@@ -9,3 +9,4 @@ mpu6050_driver:
     calibration_samples: 500
     gyro_stddev: 0.02
     accel_stddev: 0.20
+    debug_logging: false

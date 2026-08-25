@@ -1,17 +1,19 @@
 base_controller:
   ros__parameters:
     # Order: left-front, left-rear, right-front, right-rear (BCM numbering).
-    step_pins: [17, 5, 23, 12]
-    dir_pins: [27, 6, 24, 16]
-    reset_pins: [22, 13, 25, 20]
-    direction_inverted: [false, false, true, true]
+    step_pins: [14, 23, 17, 5]
+    dir_pins: [15, 24, 27, 6]
+    reset_pins: [4, 25, 22, 26]
+    sleep_pins: [12, 7, 16, 1]
+    direction_inverted: [true, true, false, false]
 
     # Measure these values on the finished robot.
     wheel_radius: 0.05
-    wheel_separation: 0.30
+    wheel_separation: 0.13
 
     # Full motor steps * microstep setting * gearbox ratio.
     steps_per_revolution: 3200.0
     max_step_rate: 1200.0
     max_step_acceleration: 1600.0
     command_timeout: 0.5
+    debug_logging: false

@@ -18,9 +18,11 @@ def generate_launch_description():
         robot_description = urdf_file.read()
 
     lidar_port = LaunchConfiguration('lidar_port')
+    start_motors = LaunchConfiguration('start_motors')
     start_lidar = LaunchConfiguration('start_lidar')
     use_imu = LaunchConfiguration('use_imu')
     start_mpu6050 = LaunchConfiguration('start_mpu6050')
+    debug_logging = LaunchConfiguration('debug_logging')
     publish_raw_odom = ParameterValue(
         PythonExpression(["'", use_imu, "'.lower() != 'true'"]),
         value_type=bool,
@@ -30,7 +32,13 @@ def generate_launch_description():
             'lidar_port', default_value='/dev/ttyUSB0',
             description='D500/LD19 serial device',
         ),
+        DeclareLaunchArgument('start_motors', default_value='true'),
         DeclareLaunchArgument('start_lidar', default_value='true'),
+        DeclareLaunchArgument(
+            'debug_logging',
+            default_value='false',
+            description='Log motor, IMU, and scan diagnostics',
+        ),
         DeclareLaunchArgument(
             'use_imu', default_value='false',
             description='Fuse /imu/data with wheel odometry',
@@ -48,11 +56,15 @@ def generate_launch_description():
         Node(
             package='my_robot',
             executable='base_controller',
+            condition=IfCondition(start_motors),
             parameters=[
                 os.path.join(package_share, 'config', 'motors.yaml'),
                 {
                     'publish_odom': publish_raw_odom,
                     'publish_odom_tf': publish_raw_odom,
+                    'debug_logging': ParameterValue(
+                        debug_logging, value_type=bool
+                    ),
                 },
             ],
             output='screen',
@@ -66,7 +78,12 @@ def generate_launch_description():
                 start_mpu6050, "'.lower() == 'true'",
             ])),
             parameters=[
-                os.path.join(package_share, 'config', 'mpu6050.yaml')
+                os.path.join(package_share, 'config', 'mpu6050.yaml'),
+                {
+                    'debug_logging': ParameterValue(
+                        debug_logging, value_type=bool
+                    )
+                },
             ],
             output='screen',
         ),
@@ -93,6 +110,17 @@ def generate_launch_description():
                 'laser_scan_dir': True,
                 'enable_angle_crop_func': False,
             }],
+            output='screen',
+        ),
+        Node(
+            package='my_robot',
+            executable='lidar_reader',
+            name='lidar_reader',
+            condition=IfCondition(PythonExpression([
+                "'", start_lidar, "'.lower() == 'true' and '",
+                debug_logging, "'.lower() == 'true'",
+            ])),
+            parameters=[{'debug_logging': True}],
             output='screen',
         ),
     ])

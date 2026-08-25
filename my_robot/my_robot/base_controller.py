@@ -22,11 +22,12 @@ class BaseController(Node):
 
     def __init__(self):
         super().__init__('base_controller')
-        self.declare_parameter('step_pins', [17, 5, 23, 12])
-        self.declare_parameter('dir_pins', [27, 6, 24, 16])
-        self.declare_parameter('reset_pins', [22, 13, 25, 20])
+        self.declare_parameter('step_pins', [14, 23, 17, 5])
+        self.declare_parameter('dir_pins', [15, 24, 27, 6])
+        self.declare_parameter('reset_pins', [4, 25, 22, 26])
+        self.declare_parameter('sleep_pins', [12, 7, 16, 1])
         self.declare_parameter(
-            'direction_inverted', [False, False, True, True]
+            'direction_inverted', [True, True, False, False]
         )
         self.declare_parameter('wheel_radius', 0.05)
         self.declare_parameter('wheel_separation', 0.30)
@@ -36,7 +37,13 @@ class BaseController(Node):
         self.declare_parameter('command_timeout', 0.5)
         self.declare_parameter('publish_odom', True)
         self.declare_parameter('publish_odom_tf', True)
+        self.declare_parameter('debug_logging', False)
 
+        step_pins = self.get_parameter('step_pins').value
+        dir_pins = self.get_parameter('dir_pins').value
+        reset_pins = self.get_parameter('reset_pins').value
+        sleep_pins = self.get_parameter('sleep_pins').value
+        direction_inverted = self.get_parameter('direction_inverted').value
         self._radius = self.get_parameter('wheel_radius').value
         self._separation = self.get_parameter('wheel_separation').value
         self._steps_per_rev = self.get_parameter(
@@ -49,20 +56,26 @@ class BaseController(Node):
         self._timeout = self.get_parameter('command_timeout').value
         self._publish_odom = self.get_parameter('publish_odom').value
         self._publish_odom_tf = self.get_parameter('publish_odom_tf').value
+        self._debug_logging = self.get_parameter('debug_logging').value
         if min(self._radius, self._separation, self._steps_per_rev) <= 0.0:
             raise ValueError(
                 'Robot dimensions and steps_per_revolution must be positive'
             )
 
         self._hardware = FourWheelHardware(
-            self.get_parameter('step_pins').value,
-            self.get_parameter('dir_pins').value,
-            self.get_parameter('reset_pins').value,
-            self.get_parameter('direction_inverted').value,
+            step_pins,
+            dir_pins,
+            reset_pins,
+            sleep_pins,
+            direction_inverted,
+            debug_callback=(
+                self._hardware_debug if self._debug_logging else None
+            ),
         )
         self._target_rates = [0.0] * 4
         self._current_rates = [0.0] * 4
         self._last_command = time.monotonic()
+        self._watchdog_active = False
         self._last_update = time.monotonic()
         self._last_counts = self._hardware.step_counts()
         self._x = 0.0
@@ -79,7 +92,15 @@ class BaseController(Node):
         )
         self._tf_broadcaster = TransformBroadcaster(self)
         self.create_timer(0.02, self._control_update)
-        self.get_logger().info('Four-wheel GPIO base controller is ready')
+        self.get_logger().info(
+            'Four-wheel GPIO base controller ready; '
+            f'STEP={step_pins}, DIR={dir_pins}, RESET={reset_pins}, '
+            f'SLEEP={sleep_pins}, inverted={direction_inverted}'
+        )
+
+    def _hardware_debug(self, message):
+        """Write an enabled motor hardware diagnostic."""
+        self.get_logger().info(f'[motor debug] {message}')
 
     def _command_callback(self, message):
         linear = message.linear.x
@@ -95,6 +116,14 @@ class BaseController(Node):
         )
         self._target_rates = [left_rate, left_rate, right_rate, right_rate]
         self._last_command = time.monotonic()
+        self._watchdog_active = False
+        if self._debug_logging:
+            self.get_logger().info(
+                '[motor debug] '
+                f'cmd_vel linear={linear:.3f} m/s angular={angular:.3f} rad/s; '
+                f'target steps/s left={left_rate:.1f}, right={right_rate:.1f}',
+                throttle_duration_sec=0.5,
+            )
 
     def _control_update(self):
         now_monotonic = time.monotonic()
@@ -102,6 +131,12 @@ class BaseController(Node):
         self._last_update = now_monotonic
         if now_monotonic - self._last_command > self._timeout:
             self._target_rates = [0.0] * 4
+            if not self._watchdog_active:
+                self._watchdog_active = True
+                if self._debug_logging:
+                    self.get_logger().info(
+                        '[motor debug] command watchdog expired; stopping'
+                    )
 
         max_change = self._max_acceleration * elapsed
         self._current_rates = [
@@ -109,7 +144,18 @@ class BaseController(Node):
             for current, target in zip(self._current_rates, self._target_rates)
         ]
         self._hardware.set_rates(self._current_rates)
-        self._publish_odometry(elapsed)
+        deltas = self._publish_odometry(elapsed)
+        if self._debug_logging and (
+            any(abs(rate) >= 0.01 for rate in self._current_rates)
+            or any(deltas)
+        ):
+            rates = ', '.join(f'{rate:.1f}' for rate in self._current_rates)
+            self.get_logger().info(
+                '[motor debug] '
+                f'actual rates LF/LR/RF/RR=[{rates}] steps/s; '
+                f'pulses this cycle={deltas}',
+                throttle_duration_sec=1.0,
+            )
 
     def _publish_odometry(self, elapsed):
         counts = self._hardware.step_counts()
@@ -158,6 +204,7 @@ class BaseController(Node):
             transform.transform.rotation.z = math.sin(half_yaw)
             transform.transform.rotation.w = math.cos(half_yaw)
             self._tf_broadcaster.sendTransform(transform)
+        return deltas
 
     def destroy_node(self):
         """Disable the motor drivers before destroying the ROS node."""

@@ -18,6 +18,7 @@ def generate_launch_description():
     lidar_port = LaunchConfiguration('lidar_port')
     use_imu = LaunchConfiguration('use_imu')
     start_mpu6050 = LaunchConfiguration('start_mpu6050')
+    debug_logging = LaunchConfiguration('debug_logging')
     return LaunchDescription([
         DeclareLaunchArgument(
             'map', description='Absolute path to the saved map YAML file'
@@ -25,6 +26,7 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0'),
         DeclareLaunchArgument('use_imu', default_value='false'),
         DeclareLaunchArgument('start_mpu6050', default_value='true'),
+        DeclareLaunchArgument('debug_logging', default_value='false'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(share, 'launch', 'base.launch.py')
@@ -33,6 +35,7 @@ def generate_launch_description():
                 'lidar_port': lidar_port,
                 'use_imu': use_imu,
                 'start_mpu6050': start_mpu6050,
+                'debug_logging': debug_logging,
             }.items(),
         ),
         Node(

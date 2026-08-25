@@ -38,6 +38,7 @@ class Mpu6050Driver(Node):
         self.declare_parameter('calibration_samples', 500)
         self.declare_parameter('gyro_stddev', 0.02)
         self.declare_parameter('accel_stddev', 0.20)
+        self.declare_parameter('debug_logging', False)
 
         if SMBus is None:
             raise RuntimeError(
@@ -46,16 +47,36 @@ class Mpu6050Driver(Node):
 
         self._address = self.get_parameter('i2c_address').value
         self._frame_id = self.get_parameter('frame_id').value
+        self._debug_logging = self.get_parameter('debug_logging').value
         publish_rate = self.get_parameter('publish_rate').value
         if publish_rate <= 0.0:
             raise ValueError('publish_rate must be positive')
 
         bus_number = self.get_parameter('i2c_bus').value
         self._bus = SMBus(bus_number)
-        self._initialize_sensor()
+        if self._debug_logging:
+            self.get_logger().info(
+                f'[imu debug] opened I2C bus {bus_number}; '
+                f'probing address 0x{self._address:02x}'
+            )
+        try:
+            self._initialize_sensor()
+        except Exception as error:
+            self.get_logger().error(
+                f'MPU6050 connection failed on I2C bus {bus_number}, '
+                f'address 0x{self._address:02x}: {error}'
+            )
+            self._bus.close()
+            raise
         self._gyro_bias = self._calibrate_gyroscope(
             self.get_parameter('calibration_samples').value
         )
+        if self._debug_logging:
+            self.get_logger().info(
+                '[imu debug] raw gyro bias '
+                f'x={self._gyro_bias[0]:.1f}, y={self._gyro_bias[1]:.1f}, '
+                f'z={self._gyro_bias[2]:.1f}'
+            )
 
         self._imu_publisher = self.create_publisher(Imu, 'imu/data', 10)
         self._temperature_publisher = self.create_publisher(
@@ -76,6 +97,11 @@ class Mpu6050Driver(Node):
         if identity not in (0x68, 0x69):
             raise RuntimeError(
                 f'Unexpected MPU6050 identity 0x{identity:02x}'
+            )
+        if self._debug_logging:
+            self.get_logger().info(
+                f'[imu debug] connection verified; '
+                f'WHO_AM_I returned 0x{identity:02x}'
             )
 
         # 200 Hz internal sample rate, 44 Hz digital low-pass filter,
@@ -165,6 +191,18 @@ class Mpu6050Driver(Node):
         temperature_message.header.frame_id = self._frame_id
         temperature_message.temperature = temperature / 340.0 + 36.53
         self._temperature_publisher.publish(temperature_message)
+        if self._debug_logging:
+            self.get_logger().info(
+                '[imu debug] '
+                f'accel=({linear_acceleration[0]:.2f}, '
+                f'{linear_acceleration[1]:.2f}, '
+                f'{linear_acceleration[2]:.2f}) m/s^2, '
+                f'gyro=({angular_velocity[0]:.3f}, '
+                f'{angular_velocity[1]:.3f}, '
+                f'{angular_velocity[2]:.3f}) rad/s, '
+                f'temperature={temperature_message.temperature:.1f} C',
+                throttle_duration_sec=1.0,
+            )
 
     def destroy_node(self):
         """Close the I2C device when shutting down."""
