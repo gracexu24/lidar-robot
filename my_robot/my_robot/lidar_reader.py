@@ -1,9 +1,13 @@
+"""Example node that reports the closest valid LiDAR return."""
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
 
 class LidarReader(Node):
+    """Subscribe to LaserScan data and report the nearest return."""
+
     def __init__(self):
         super().__init__('lidar_reader')
 
@@ -15,6 +19,7 @@ class LidarReader(Node):
         )
 
     def scan_callback(self, msg):
+        """Process one laser scan."""
         valid_ranges = [
             r for r in msg.ranges
             if msg.range_min < r < msg.range_max
@@ -32,6 +37,7 @@ class LidarReader(Node):
 
 
 def main(args=None):
+    """Run the LiDAR reader example."""
     rclpy.init(args=args)
     node = LidarReader()
     rclpy.spin(node)

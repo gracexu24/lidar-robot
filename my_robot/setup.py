@@ -1,3 +1,6 @@
+import os
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'my_robot'
@@ -10,13 +13,19 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (
+            os.path.join('share', package_name, 'launch'),
+            glob('launch/*.launch.py'),
+        ),
+        (os.path.join('share', package_name, 'urdf'), glob('urdf/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='lidar',
     maintainer_email='lidar@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='Four-wheel GPIO mobile robot with D500 LiDAR navigation',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
@@ -24,7 +33,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-		'lidar_reader = my_robot.lidar_reader:main',
+            'base_controller = my_robot.base_controller:main',
+            'drive = my_robot.manual_drive:main',
+            'lidar_reader = my_robot.lidar_reader:main',
+            'mpu6050_driver = my_robot.mpu6050_driver:main',
         ],
     },
 )
