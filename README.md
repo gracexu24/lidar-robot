@@ -1,227 +1,239 @@
 # Four-wheel ROS 2 LiDAR robot
 
-ROS 2 Jazzy software for a Raspberry Pi 5, four STEP/DIR stepper drivers, and
-the Waveshare D500 kit (LDROBOT LD19 2D LiDAR).
+ROS 2 Jazzy software for a Raspberry Pi 5 robot with:
 
-## Important hardware requirements
+- Four independently driven STEP/DIR stepper motors
+- Four-wheel skid-steer/differential-drive motion
+- Waveshare D500 / LDROBOT LD19 2D LiDAR
+- Optional MPU6050 IMU over I²C
+- SLAM Toolbox mapping
+- Nav2 saved-map navigation
 
-The Raspberry Pi GPIO pins must connect to **stepper driver logic inputs**, not
-directly to motors. Use one suitable driver per motor (for example, a correctly
-sized A4988/TMC/DRV-style driver), an external motor power supply, current
-limiting, and a common ground between that supply, the drivers, and the Pi.
-Never power motors from a Pi 5 V or 3.3 V pin. Test with the wheels raised and
-keep a physical emergency power disconnect within reach.
+## How the system works
 
-The default BCM pin order is left-front, left-rear, right-front, right-rear:
+The main data flow is:
 
-| Signal | LF | LR | RF | RR |
-|---|---:|---:|---:|---:|
-| STEP | 14 | 23 | 17 | 5 |
-| DIR | 15 | 24 | 27 | 6 |
-| RESET | 4 | 25 | 22 | 26 |
-| SLEEP | 12 | 7 | 16 | 1 |
-
-The matching defaults in
-`~/ros2_ws/src/lidar-robot/my_robot/config/motors.yaml` are:
-
-```yaml
-base_controller:
-  ros__parameters:
-    step_pins: [14, 23, 17, 5]
-    dir_pins: [15, 24, 27, 6]
-    reset_pins: [4, 25, 22, 26]
-    sleep_pins: [12, 7, 16, 1]
-    direction_inverted: [true, true, false, false]
+```text
+Manual command or Nav2
+          |
+       /cmd_vel
+          |
+   base_controller
+          |
+  four STEP/DIR rates
+          |
+     motor drivers
 ```
 
-These are BCM GPIO numbers, not physical header pin numbers. GPIO14 and GPIO15
-are also UART pins, so the serial console/UART must not be using them. GPIO1 is
-normally reserved for HAT identification; use it only when nothing attached to
-the Pi needs that interface.
+The localization and navigation flow is:
 
-The code assumes active-low RESET and SLEEP inputs, as used by A4988-style
-drivers. It pulses RESET once during initialization and otherwise leaves it
-high. It stops STEP pulses and pulls SLEEP low whenever a wheel is stopped,
-including watchdog and shutdown stops. Before movement it raises SLEEP and
-waits for the driver to wake. Confirm these input levels against the exact
-driver datasheet before applying power.
+```text
+Motor pulse counts -> /wheel/odom --+
+                                    +-> robot_localization EKF -> /odom
+MPU6050 gyro ------> /imu/data -----+
 
-## Install on the Raspberry Pi
+D500 LiDAR -> /scan -> SLAM Toolbox or AMCL -> Nav2 -> /cmd_vel
+```
 
-need ros2 and rosdep 
+Without IMU fusion, the base controller publishes `/odom` and the
+`odom -> base_footprint` transform directly. With `use_imu:=true`,
+`robot_localization` combines wheel odometry and MPU6050 yaw rate and becomes
+the only publisher of that filtered odometry and transform.
 
-Use 64-bit Ubuntu 24.04 and ROS 2 Jazzy. Raspberry Pi OS is not a binary
-supported Jazzy platform. For a new machine, initialize rosdep once with
-`sudo rosdep init`; if it reports that rosdep is already initialized, continue.
+The TF frame chain is:
+
+```text
+map -> odom -> base_footprint -> base_link -> base_laser
+                                         \-> imu_link
+```
+
+## Safety and motor-driver assumptions
+
+GPIO pins connect only to stepper-driver logic inputs. Never connect a motor
+directly to Raspberry Pi GPIO or power a motor from the Pi's 3.3 V or 5 V
+pins. Use:
+
+- One correctly sized driver per motor
+- A separate motor power supply
+- Proper driver current limiting and cooling
+- A common ground between the Pi, drivers, and motor supply
+- A physical emergency power disconnect
+
+Always perform initial tests with the wheels raised.
+
+The code assumes A4988-style active-low RESET and SLEEP inputs. RESET is used
+during startup; SLEEP is held low while a wheel is stopped and raised before
+movement. Verify these signal levels against your exact driver datasheet.
+
+## Default motor wiring
+
+All values below are BCM GPIO numbers in left-front, left-rear, right-front,
+right-rear order:
+
+```text
+STEP:  14, 23, 17, 5
+DIR:   15, 24, 27, 6
+RESET:  4, 25, 22, 26
+SLEEP: 12,  7, 16, 1
+```
+
+The configuration is in `my_robot/config/motors.yaml`.
+
+GPIO14 and GPIO15 are UART pins, so disable the serial console before using
+them as motor GPIO. GPIO1 is normally reserved for HAT identification; change
+that assignment if a HAT or EEPROM interface needs it.
+
+## MPU6050 wiring
+
+Power off the Pi before wiring:
+
+- VCC -> Pi 3.3 V, physical pin 1
+- GND -> Pi ground, physical pin 6
+- SDA -> GPIO2/SDA, physical pin 3
+- SCL -> GPIO3/SCL, physical pin 5
+- AD0 low/GND -> I²C address `0x68`
+- AD0 high/3.3 V -> I²C address `0x69`
+- Leave INT, XDA, and XCL disconnected
+
+Using 3.3 V is safest. Do not use 5 V unless the exact breakout includes safe
+regulation and I²C level shifting.
+
+Ensure `/boot/firmware/config.txt` contains:
+
+```text
+dtparam=i2c_arm=on
+```
+
+Then reboot and verify the device:
+
+```bash
+ls /dev/i2c-1
+sudo i2cdetect -y 1
+```
+
+Set the detected address in `my_robot/config/mpu6050.yaml`.
+
+## Install
+
+Use 64-bit Ubuntu 24.04 and ROS 2 Jazzy. Configure the official ROS 2 apt
+repository first, then install the required packages:
 
 ```bash
 sudo apt update
-sudo apt install ros-jazzy-desktop ros-jazzy-navigation2 \
-  ros-jazzy-nav2-bringup ros-jazzy-slam-toolbox \
+sudo apt install \
+  ros-jazzy-desktop \
+  ros-jazzy-navigation2 \
+  ros-jazzy-nav2-bringup \
+  ros-jazzy-slam-toolbox \
   ros-jazzy-robot-localization \
-  python3-gpiozero python3-lgpio python3-smbus2 python3-rosdep i2c-tools
+  python3-gpiozero \
+  python3-lgpio \
+  python3-smbus2 \
+  python3-rosdep \
+  i2c-tools
+```
 
+Initialize rosdep once:
+
+```bash
+sudo rosdep init
+rosdep update
+```
+
+If `rosdep init` says it is already initialized, continue.
+
+Create and build the workspace:
+
+```bash
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
 git clone https://github.com/gracexu24/lidar-robot.git
 git clone https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git
+
 cd ~/ros2_ws
 source /opt/ros/jazzy/setup.bash
-rosdep update
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source ~/ros2_ws/install/setup.bash
 ```
 
-Connect the D500 USB adapter. Prefer its stable name from
-`ls -l /dev/serial/by-id/`; otherwise use `/dev/ttyUSB0`. Add your user to the
-serial group and then log out and in:
+Grant hardware access, then log out and back in:
 
 ```bash
-sudo usermod -aG dialout "$USER"
+sudo usermod -aG dialout,i2c "$USER"
 ```
 
-Do not use `chmod 666` as a permanent serial-port solution.
+Use `/dev/serial/by-id/...` for the LiDAR when possible because it is more
+stable than `/dev/ttyUSB0`.
 
-## Connection and debug checks
+## Configure the robot
 
-Rebuild and source the workspace after changing this repository:
+Edit `my_robot/config/motors.yaml`:
+
+- `direction_inverted`: reverse individual logical wheel directions.
+- `wheel_radius`: loaded wheel radius in metres.
+- `wheel_separation`: distance between the left and right wheel contact lines.
+- `steps_per_revolution`: full motor steps × microsteps × gearbox ratio.
+- `max_step_rate`: maximum STEP pulses per second.
+- `max_step_acceleration`: pulse-rate change per second.
+- `command_timeout`: stop after this many seconds without `/cmd_vel`.
+
+Edit `my_robot/urdf/robot.urdf`:
+
+- Set `base_joint` to the measured chassis height above the floor.
+- Set `laser_joint` to the measured LiDAR position and orientation.
+- Set `imu_joint` to the measured MPU6050 position and orientation.
+
+ROS robot axes are x forward, y left, and z up.
+
+Edit `my_robot/config/nav2.yaml`:
+
+- Set `robot_radius` to fully contain the robot.
+- Keep initial velocity and acceleration limits low.
+- Tune inflation and obstacle ranges only after `/scan` and odometry work.
+
+## Terminal preparation
+
+Every new terminal used below must source ROS and this workspace:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+```
+
+After changing Python, launch, YAML, URDF, or package files, rebuild:
 
 ```bash
 cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash
 colcon build --symlink-install
 source ~/ros2_ws/install/setup.bash
-ros2 doctor --report
 ```
 
-Set `debug_logging:=true` on a launch command to print motor GPIO
-initialization, wake/sleep, watchdog, commanded and actual pulse rates,
-MPU6050 connection and live measurements, and LiDAR connection and scan
-statistics. Debug messages are throttled so they do not print at sensor or
-control-loop rate.
+## Test 1: package tests
 
-### Motor test
+This test does not require connected hardware:
 
-Raise all wheels off the floor and keep the emergency power disconnect within
-reach. Start the motor controller without the LiDAR:
+```bash
+cd ~/ros2_ws
+colcon test --packages-select my_robot
+colcon test-result --verbose
+```
+
+It runs Python lint checks and a mocked GPIO test for RESET/SLEEP behavior.
+
+## Test 2: motors
+
+Raise all wheels and start only the motor controller:
 
 ```bash
 ros2 launch my_robot base.launch.py \
-  start_lidar:=false debug_logging:=true
+  start_lidar:=false \
+  debug_logging:=true
 ```
 
-Expected startup output lists all configured GPIOs and reports that RESET
-completed while each driver is sleeping. In another sourced terminal, run one
-low-speed command at a time:
+In another sourced terminal, test one command at a time:
 
 ```bash
-ros2 run my_robot drive front --duration 1 --speed 0.05
-ros2 run my_robot drive back --duration 1 --speed 0.05
-ros2 run my_robot drive left --duration 1 --turn-speed 0.4
-ros2 run my_robot drive right --duration 1 --turn-speed 0.4
-```
-
-For each command, debug output should show the target rates, actual pulse rates
-and counts, `SLEEP high`, then `SLEEP low` after stopping. All four wheels must
-physically move in the named direction without skipping. The software can prove
-that pulses were generated, but there are no wheel encoders, so it cannot prove
-that a disconnected or stalled motor actually turned. Use a multimeter or logic
-analyzer if needed: SLEEP should be low while stopped and high while moving;
-RESET should remain high after its short startup pulse.
-
-### IMU test
-
-First verify the kernel can see the device. The output must contain `68` (AD0
-low) or `69` (AD0 high):
-
-```bash
-ls -l /dev/i2c-1
-i2cdetect -y 1
-```
-
-Keep the robot still and run only the MPU6050 node:
-
-```bash
-ros2 run my_robot mpu6050_driver --ros-args \
-  --params-file "$(ros2 pkg prefix my_robot)/share/my_robot/config/mpu6050.yaml" \
-  -p debug_logging:=true
-```
-
-Expected output includes a valid `WHO_AM_I`, calibration completion, gyro bias,
-and live measurements. In another sourced terminal:
-
-```bash
-timeout 5s ros2 topic hz /imu/data
-ros2 topic echo /imu/data --once
-ros2 topic echo /imu/temperature --once
-```
-
-The rate should be near 100 Hz. At rest, angular velocity should be near zero
-and total acceleration should be near 9.8 m/s². Rotate the sensor by hand and
-confirm the corresponding angular-velocity axis changes. I2C read errors,
-an unexpected identity, or no topic messages indicate a connection,
-permissions, address, or configuration problem.
-
-### LiDAR test
-
-Find the stable serial device and verify that the current user can access it:
-
-```bash
-ls -l /dev/serial/by-id/
-test -r /dev/serial/by-id/YOUR_D500_DEVICE && \
-  test -w /dev/serial/by-id/YOUR_D500_DEVICE && echo "serial access OK"
-```
-
-Start only the LiDAR side of the base launch:
-
-```bash
-ros2 launch my_robot base.launch.py start_motors:=false \
-  lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE debug_logging:=true
-```
-
-In another sourced terminal:
-
-```bash
-ros2 topic info /scan --verbose
-timeout 5s ros2 topic hz /scan
-ros2 topic echo /scan --once
-```
-
-The scan topic must have a publisher, a stable message rate, finite ranges, and
-changing closest-distance and angle output when an object moves in front of the
-sensor. The debug reader starts automatically when debug logging is enabled and
-warns if `/scan` never arrives or stops. If the serial device exists but no
-scans arrive, check the `dialout` group, 230400 baud support, the selected
-device path, USB power, and the launch log.
-
-## Configure and test the wheels
-
-Edit `~/ros2_ws/src/lidar-robot/my_robot/config/motors.yaml`:
-
-- `direction_inverted`: change each value until a positive command rotates all
-  wheels toward the robot's front.
-- `step_pins`, `dir_pins`, `reset_pins`, and `sleep_pins`: four BCM GPIO
-  numbers in LF, LR, RF, RR order.
-- `wheel_radius`: loaded wheel radius in metres.
-- `wheel_separation`: left-to-right wheel contact-line distance in metres.
-- `steps_per_revolution`: motor full steps × microstep setting × gear ratio.
-- `max_step_rate`: lower this if motors skip or stall.
-
-Start only the base controller for the first wheel test:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_robot base.launch.py start_lidar:=false
-```
-
-In another sourced terminal, run a command. It publishes repeatedly for the
-requested duration, then publishes stop:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
 ros2 run my_robot drive front --duration 1 --speed 0.05
 ros2 run my_robot drive back --duration 1 --speed 0.05
 ros2 run my_robot drive left --duration 1 --turn-speed 0.4
@@ -229,195 +241,230 @@ ros2 run my_robot drive right --duration 1 --turn-speed 0.4
 ros2 run my_robot drive stop
 ```
 
-The controller also accepts normal `geometry_msgs/msg/Twist` messages on
-`/cmd_vel`. A 0.5-second watchdog stops the motors when commands disappear.
+All wheels should move in the named direction without skipping. Adjust
+`direction_inverted` if an individual wheel turns backward.
 
-## Check the LiDAR
+You can also publish a standard ROS velocity command:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_robot base.launch.py \
-  start_motors:=false \
-  lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE
+ros2 topic pub --rate 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.05}, angular: {z: 0.0}}"
 ```
 
-While that launch command is running, use another sourced terminal:
+Press Ctrl+C to stop publishing. The command watchdog then sets the target
+speed to zero.
+
+## Test 3: MPU6050
+
+The I²C scan must show `68` or `69`:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
+sudo i2cdetect -y 1
+```
+
+Keep the robot completely still while starting the driver. Its 500-sample
+gyro calibration takes approximately 2.5 seconds:
+
+```bash
+ros2 run my_robot mpu6050_driver --ros-args \
+  --params-file "$(ros2 pkg prefix my_robot)/share/my_robot/config/mpu6050.yaml" \
+  -p debug_logging:=true
+```
+
+Check the topics from another sourced terminal:
+
+```bash
+timeout 5s ros2 topic hz /imu/data
+ros2 topic echo /imu/data --once
+ros2 topic echo /imu/temperature --once
+```
+
+The publication rate should be close to 100 Hz. At rest, angular velocity
+should be near zero and acceleration magnitude should be near 9.8 m/s².
+
+The MPU6050 has no magnetometer, so it cannot measure absolute yaw. The EKF
+uses only its measured z-axis angular velocity.
+
+## Test 4: D500 LiDAR and RViz
+
+Locate the serial device:
+
+```bash
+ls -l /dev/serial/by-id/
+```
+
+Start the LiDAR without activating the motors:
+
+```bash
+ros2 launch my_robot base.launch.py \
+  start_motors:=false \
+  use_imu:=false \
+  lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE \
+  debug_logging:=true
+```
+
+Check scan delivery:
+
+```bash
+ros2 topic info /scan --verbose
+timeout 5s ros2 topic hz /scan
 ros2 topic echo /scan --once
 ```
 
-The D500 uses the LD19 protocol at 230400 baud. `base.launch.py` starts the
-official `ldlidar_stl_ros2_node`, publishes `/scan`, and sets its frame ID to
-`base_laser`. Update the `laser_joint` position and yaw in
-`my_robot/urdf/robot.urdf` to the measured LiDAR pose. A wrong pose or forward
-direction distorts maps.
-
-## Optional MPU6050 IMU fusion
-
-The included `mpu6050_driver` reads an MPU6050 directly from Raspberry Pi I2C.
-With the Pi powered off, connect a typical 3.3 V MPU6050 breakout as follows:
-
-- MPU6050 VCC to Pi 3.3 V, physical pin 1.
-- MPU6050 GND to Pi ground, physical pin 6.
-- MPU6050 SDA to GPIO2/SDA, physical pin 3.
-- MPU6050 SCL to GPIO3/SCL, physical pin 5.
-- Leave INT, XDA, and XCL disconnected.
-- Tie AD0 low for address `0x68`; tie it high for `0x69`.
-
-Using 3.3 V is safest. Do not use 5 V unless the exact breakout explicitly
-includes both a regulator and safe I2C level shifting.
-
-Enable I2C in `/boot/firmware/config.txt` by ensuring it contains
-`dtparam=i2c_arm=on`, then reboot. Grant your user I2C access and check that the
-sensor appears:
+Open the viewer:
 
 ```bash
-sudo usermod -aG i2c "$USER"
-sudo reboot
+rviz2
 ```
 
-After the reboot:
+In RViz:
+
+1. Set **Fixed Frame** to `base_link`.
+2. Select **Add**, then **By topic**.
+3. Add the `/scan` LaserScan display.
+4. Optionally add RobotModel and TF displays.
+
+Verify the static LiDAR pose:
 
 ```bash
-ls /dev/i2c-1
-i2cdetect -y 1
+ros2 run tf2_ros tf2_echo base_link base_laser
 ```
 
-The scan should show `68`, or `69` when AD0 is high. Set that address in
-`my_robot/config/mpu6050.yaml`. A blank scan indicates a wiring, power, I2C
-configuration, or defective-module problem.
+This prints the translation and rotation of `base_laser` relative to
+`base_link`. It does not move or configure the robot.
 
-Mount the module rigidly with its marked x axis forward, y axis left, and z axis
-up. If it is mounted differently, set the measured rotation in `imu_joint` in
-`my_robot/urdf/robot.urdf`.
+## Test 5: IMU and wheel-odometry fusion
 
-Rebuild after code or dependency changes, then launch with IMU fusion enabled:
+Start motors and the MPU6050 without the LiDAR:
 
 ```bash
-cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
-source ~/ros2_ws/install/setup.bash
-
-ros2 launch my_robot base.launch.py use_imu:=true
+ros2 launch my_robot base.launch.py \
+  start_lidar:=false \
+  use_imu:=true \
+  debug_logging:=true
 ```
 
-While the launch command is running, check its topics in another sourced
-terminal:
+Check the raw and filtered inputs:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-timeout 5s ros2 topic hz /imu/data
+ros2 topic echo /wheel/odom --once
 ros2 topic echo /imu/data --once
 ros2 topic echo /odom --once
+ros2 run tf2_ros tf2_echo odom base_footprint
 ```
 
-Run either mapping:
+`robot_localization` reads `/wheel/odom` and `/imu/data`, then publishes
+filtered `/odom` and `odom -> base_footprint`.
+
+## Test 6: create and save a map
+
+Start with low speeds in a clear indoor area:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_robot mapping.launch.py use_imu:=true \
-  lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE
-```
-
-Or saved-map navigation:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_robot navigation.launch.py use_imu:=true \
-  map:=$HOME/maps/home.yaml \
-  lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE
-```
-
-Keep the robot completely still for about 2.5 seconds whenever the driver
-starts; it measures gyro bias during this period. The MPU6050 has no
-magnetometer and cannot measure absolute yaw, so `my_robot/config/ekf.yaml`
-fuses its
-measured yaw rate, not an invented orientation. This improves short-term turns
-but does not eliminate long-term heading drift.
-
-When fusion is enabled, `robot_localization` alone publishes `/odom` and
-`odom -> base_footprint`, preventing duplicate TF publishers. To use another
-IMU driver instead, launch with `use_imu:=true start_mpu6050:=false` and make
-that driver publish `sensor_msgs/msg/Imu` on `/imu/data`.
-
-## Create a map with SLAM and Nav2
-
-Raise-test manual motion first, then place the robot in a clear area:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
 ros2 launch my_robot mapping.launch.py \
+  use_imu:=true \
   lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE
 ```
 
-Open RViz (`rviz2`), set the fixed frame to `map`, add Map and LaserScan
-displays, then drive manually or select a Nav2 goal. Keep the mapping launch
-running while saving a completed map from another sourced terminal:
+Open RViz, set **Fixed Frame** to `map`, and add Map, LaserScan, RobotModel,
+and TF. Drive manually or send Nav2 goals while the map is built.
+
+Save the completed map from another sourced terminal:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
 mkdir -p ~/maps
 ros2 run nav2_map_server map_saver_cli -f ~/maps/home
 ```
 
-## Navigate on a saved map
+This creates `home.yaml` and `home.pgm`.
+
+## Test 7: navigate on a saved map
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
 ros2 launch my_robot navigation.launch.py \
+  use_imu:=true \
   map:=$HOME/maps/home.yaml \
   lidar_port:=/dev/serial/by-id/YOUR_D500_DEVICE
 ```
 
-In RViz, use **2D Pose Estimate** once to initialize localization, then use
-**Nav2 Goal**. Start with low speeds in `my_robot/config/nav2.yaml`.
+In RViz:
 
-## Run package tests
+1. Set the fixed frame to `map`.
+2. Use **2D Pose Estimate** to initialize AMCL.
+3. Use **Nav2 Goal** to select a destination.
+
+The current Nav2 configuration provides basic reactive LiDAR obstacle
+avoidance through the local costmap and DWB controller. It does not predict
+moving-object trajectories and is not safety-rated around people.
+
+## Debugging
+
+Add `debug_logging:=true` to base, mapping, or navigation launch commands to
+print throttled motor, IMU, and LiDAR diagnostics.
+
+Useful commands:
 
 ```bash
-cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon test --packages-select my_robot
-colcon test-result --verbose
+ros2 doctor --report
+ros2 node list
+ros2 topic list
+ros2 topic hz /scan
+ros2 topic hz /imu/data
+ros2 topic hz /odom
+ros2 run tf2_tools view_frames
 ```
 
-The tests include lint checks and mocked verification that routine motor stops
-use SLEEP without reasserting RESET.
+If LiDAR data is missing, check serial permissions, the selected serial path,
+USB power, and whether the LD19 driver started successfully.
 
-## Code structure
+If IMU data is missing, check `/dev/i2c-1`, address `0x68`/`0x69`, wiring,
+permissions, and whether the robot remained still during startup.
 
-- `base_controller.py`: converts `/cmd_vel` into left/right wheel speeds,
-  ramps step rates, enforces the watchdog, and publishes wheel odometry.
-- `stepper_hardware.py`: four GPIO pulse threads and driver sleep/reset
-  handling.
-- `mpu6050_driver.py`: I2C accelerometer, gyro, and temperature publisher.
-- `lidar_reader.py`: diagnostic subscriber that reports LiDAR scan statistics.
-- `manual_drive.py`: the `front`, `back`, `left`, `right`, and `stop` CLI.
-- `base.launch.py`: motor node, robot transforms, D500 driver, and optional EKF.
-- `mapping.launch.py`: base + SLAM Toolbox + Nav2.
-- `navigation.launch.py`: base + map server + AMCL + Nav2.
-- `navigation_core.launch.py`: Nav2 servers shared by mapping and navigation.
-- `motors.yaml`, `mpu6050.yaml`, `ekf.yaml`, `slam.yaml`, `nav2.yaml`: hardware
-  and navigation tuning.
+If motors do not move, verify the external motor supply, common ground,
+driver current limit, SLEEP level, GPIO assignments, and STEP pulses with a
+logic analyzer.
 
-## Accuracy limitation that must be addressed
+## Code overview
 
-The supplied code estimates odometry by counting pulses sent to the drivers.
-It cannot detect skipped motor steps or wheel slip. SLAM may correct some map
-drift, but dependable autonomous navigation needs wheel encoders (and ideally
-an IMU) fused with `robot_localization`. After adding encoders, publish measured
-wheel odometry instead of this open-loop estimate. Python on Linux also does
-not produce hard real-time GPIO timing; for higher speed/reliability, move pulse
-generation and encoder counting to a microcontroller and exchange velocity and
-odometry with the Pi over micro-ROS or serial.
+- `my_robot/my_robot/base_controller.py`: receives `/cmd_vel`, calculates
+  differential-drive wheel rates, ramps acceleration, commands GPIO hardware,
+  and estimates odometry from generated pulses.
+- `my_robot/my_robot/stepper_hardware.py`: controls each driver's STEP, DIR,
+  RESET, and SLEEP pins in a background pulse thread.
+- `my_robot/my_robot/mpu6050_driver.py`: reads the MPU6050 over I²C, calibrates
+  gyro bias, and publishes acceleration, angular velocity, and temperature.
+- `my_robot/my_robot/manual_drive.py`: publishes bounded front, back, left,
+  right, and stop commands.
+- `my_robot/my_robot/lidar_reader.py`: optional diagnostic subscriber for
+  `/scan`.
+- `my_robot/launch/base.launch.py`: starts hardware nodes, robot transforms,
+  optional EKF fusion, and diagnostics.
+- `my_robot/launch/mapping.launch.py`: starts the physical robot, online SLAM,
+  and Nav2.
+- `my_robot/launch/navigation.launch.py`: starts the physical robot, saved-map
+  server, AMCL, and Nav2.
+- `my_robot/launch/navigation_core.launch.py`: starts shared Nav2 planning,
+  control, behavior, smoothing, and lifecycle nodes.
+- `my_robot/config/motors.yaml`: GPIO and drivetrain calibration.
+- `my_robot/config/mpu6050.yaml`: I²C and IMU publication settings.
+- `my_robot/config/ekf.yaml`: wheel/IMU fusion selection.
+- `my_robot/config/slam.yaml`: SLAM frames, scan matching, resolution, and loop
+  closure.
+- `my_robot/config/nav2.yaml`: AMCL, planner, DWB controller, costmaps,
+  recovery behaviors, and velocity limits.
+- `my_robot/urdf/robot.urdf`: chassis and sensor frames used by TF.
+- `my_robot/setup.py` and `package.xml`: Python executables, installed data,
+  ROS dependencies, and package metadata.
+
+## Known limitations
+
+- Wheel odometry counts generated pulses, not measured wheel rotation.
+- Missed steps and wheel slip are not detected because there are no encoders.
+- MPU6050 yaw rate improves short-term turns but still drifts over time.
+- Python/Linux GPIO timing is not hard real-time.
+- The 2D LiDAR only detects obstacles intersecting its scan plane.
+- Navigation and obstacle avoidance are not safety-rated.
+
+For more reliable autonomous operation, add wheel encoders and fuse measured
+encoder odometry with the IMU. For higher pulse rates, move motor pulse
+generation and encoder counting to a microcontroller.
