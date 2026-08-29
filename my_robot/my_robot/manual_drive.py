@@ -3,8 +3,8 @@
 import argparse
 import time
 
-import rclpy
 from geometry_msgs.msg import Twist
+import rclpy
 from rclpy.node import Node
 from rclpy.utilities import remove_ros_args
 

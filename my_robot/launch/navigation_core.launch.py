@@ -4,7 +4,10 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -12,7 +15,13 @@ def generate_launch_description():
     params = os.path.join(
         get_package_share_directory('my_robot'), 'config', 'nav2.yaml'
     )
-    common = {'parameters': [params], 'output': 'screen'}
+    use_sim_time = ParameterValue(
+        LaunchConfiguration('use_sim_time'), value_type=bool
+    )
+    common = {
+        'parameters': [params, {'use_sim_time': use_sim_time}],
+        'output': 'screen',
+    }
     lifecycle_nodes = [
         'controller_server',
         'planner_server',
@@ -21,6 +30,7 @@ def generate_launch_description():
         'velocity_smoother',
     ]
     return LaunchDescription([
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         Node(
             package='nav2_controller',
             executable='controller_server',
@@ -64,6 +74,7 @@ def generate_launch_description():
             parameters=[{
                 'autostart': True,
                 'node_names': lifecycle_nodes,
+                'use_sim_time': use_sim_time,
             }],
             output='screen',
         ),
