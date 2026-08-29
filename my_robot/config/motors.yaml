@@ -8,8 +8,8 @@ base_controller:
     direction_inverted: [true, true, false, false]
 
     # Measure these values on the finished robot.
-    wheel_radius: 0.05
-    wheel_separation: 0.13
+    wheel_radius: 0.049
+    wheel_separation: 0.165
 
     # Full motor steps * microstep setting * gearbox ratio.
     steps_per_revolution: 3200.0

@@ -396,6 +396,10 @@ simulation should match the physical robot:
 - LiDAR minimum/maximum range, sample count, and update rate
 
 The URDF and SDF are separate models; changing one does not update the other.
+The current SDF is synchronized to the measured 0.24 × 0.16 × 0.04 m body,
+0.049 m wheel radius, 0.03 m wheel width, 0.165 m wheel separation, and current
+LiDAR and IMU transforms. It still assumes a 0.22 m wheelbase, 8 kg base mass,
+and 0.3 kg per wheel until those values are measured.
 
 ### Calibration procedure
 
@@ -408,25 +412,105 @@ The URDF and SDF are separate models; changing one does not update the other.
 7. Validate IMU axes and noise values.
 8. Copy the final geometry into the Gazebo SDF if simulation should match.
 
-Mark a starting position and request a 1.0 m straight movement:
+First calculate the starting `steps_per_revolution`:
+
+```text
+steps_per_revolution =
+    motor full steps/revolution × microstep setting × gearbox ratio
+```
+
+For a 200-step motor, 1/16 microstepping, and no gearbox, use 3200. A large
+factor-of-2, 4, 8, or 16 distance error usually means the configured microstep
+setting does not match the driver's MS pins. Correct that mismatch before
+fine calibration.
+
+#### Correct movement directions
+
+Raise all wheels and run the short front, back, left, and right commands from
+the motor test:
+
+- `front`: all four wheel contact surfaces must move toward the robot's rear,
+  which propels the robot forward when placed on the floor
+- `back`: all four wheels must reverse
+- `left`: left wheels reverse while right wheels move forward
+- `right`: right wheels reverse while left wheels move forward
+
+If one wheel is reversed, toggle only its matching `direction_inverted` entry.
+If an entire side behaves incorrectly, verify LF/LR/RF/RR GPIO ordering before
+changing calibration. `steps_per_revolution` changes distance, not direction.
+
+#### Calibrate forward and backward distance
+
+Use a flat, high-traction surface at operating weight. Mark the start point and
+run:
 
 ```bash
 ros2 run my_robot drive front --duration 10 --speed 0.10
 ```
 
-Correct the step calibration:
+The expected distance is speed × duration, or 1.0 m for this command. Measure
+from the same physical point on the robot before and after movement, then use:
 
 ```text
 new steps_per_revolution =
     old steps_per_revolution × expected distance ÷ measured distance
 ```
 
-Next, command a slow measured rotation and correct turning:
+If the robot travels only 0.80 m with 3200 configured steps:
+
+```text
+3200 × 1.00 ÷ 0.80 = 4000 steps/revolution
+```
+
+Repeat forward at least three times and use the average measured distance. Then
+repeat backward. If forward and backward differ substantially, inspect driver
+current limits, loose wheels, backlash, floor slip, battery voltage, and missed
+steps; one shared step value cannot correct a mechanical direction-dependent
+error.
+
+If the robot consistently curves while all four directions are correct, do not
+change the shared step count first. Check unequal wheel diameters, binding,
+driver current, motor skipping, weight distribution, and traction. This
+controller currently has no independent per-wheel scale factors or encoders.
+
+#### Calibrate turns
+
+After straight distance is accurate, mark the robot's initial heading and
+request a slow 180° left turn:
+
+```bash
+ros2 run my_robot drive left --duration 15.708 --turn-speed 0.20
+```
+
+Measure the actual angle in radians or degrees. Use the same units for expected
+and measured angles:
 
 ```text
 new wheel_separation =
     old wheel_separation × expected turn angle ÷ measured turn angle
 ```
+
+For example, if 180° was requested but the robot turned only 150° with a
+0.165 m separation:
+
+```text
+0.165 × 180 ÷ 150 = 0.198 m
+```
+
+Repeat left and right turns several times and average the results. Calibrate on
+the same floor used for navigation because four-wheel skid-steer turning
+depends strongly on tire scrub and traction. If left and right results differ
+greatly, correct mechanical drag, motor current, wheel size, or weight balance
+instead of hiding the asymmetry in one separation value.
+
+#### Tune rate and acceleration
+
+Begin at low speed with the wheels raised, then test on the floor at operating
+weight. Reduce `max_step_rate` when motors buzz, stop rotating, or lose steps at
+steady speed. Reduce `max_step_acceleration` when they lose steps while starting,
+stopping, or reversing. Set conservative limits below the first failure point,
+then repeat the straight and turn calibration because missed steps invalidate
+those measurements.
 
 ### Map with the physical robot
 
