@@ -7,13 +7,14 @@ base_controller:
     sleep_pins: [12, 7, 16, 1]
     direction_inverted: [true, true, false, false]
 
-    # Measure these values on the finished robot.
-    wheel_radius: 0.049
-    wheel_separation: 0.165
+    # Directly calibrated physical movement conversions.
+    left_steps_per_meter: 652.0
+    right_steps_per_meter: 645.0
+    turn_steps_per_radian: 54.75
 
-    # Full motor steps * microstep setting * gearbox ratio.
-    steps_per_revolution: 3200.0
-    max_step_rate: 1200.0
-    max_step_acceleration: 1600.0
+    # Pulse frequency controls speed; these conservative full-step limits
+    # preserve approximately the previous 0.115 m/s and 0.154 m/s^2 limits.
+    max_step_rate: 75.0
+    max_step_acceleration: 100.0
     command_timeout: 0.5
     debug_logging: false

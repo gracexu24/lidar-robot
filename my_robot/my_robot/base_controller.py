@@ -28,11 +28,11 @@ class BaseController(Node):
         self.declare_parameter(
             'direction_inverted', [True, True, False, False]
         )
-        self.declare_parameter('wheel_radius', 0.05)
-        self.declare_parameter('wheel_separation', 0.30)
-        self.declare_parameter('steps_per_revolution', 3200.0)
-        self.declare_parameter('max_step_rate', 1200.0)
-        self.declare_parameter('max_step_acceleration', 1600.0)
+        self.declare_parameter('left_steps_per_meter', 652.0)
+        self.declare_parameter('right_steps_per_meter', 645.0)
+        self.declare_parameter('turn_steps_per_radian', 54.75)
+        self.declare_parameter('max_step_rate', 75.0)
+        self.declare_parameter('max_step_acceleration', 100.0)
         self.declare_parameter('command_timeout', 0.5)
         self.declare_parameter('publish_odom', True)
         self.declare_parameter('publish_odom_tf', True)
@@ -43,10 +43,14 @@ class BaseController(Node):
         reset_pins = self.get_parameter('reset_pins').value
         sleep_pins = self.get_parameter('sleep_pins').value
         direction_inverted = self.get_parameter('direction_inverted').value
-        self._radius = self.get_parameter('wheel_radius').value
-        self._separation = self.get_parameter('wheel_separation').value
-        self._steps_per_rev = self.get_parameter(
-            'steps_per_revolution'
+        self._left_steps_per_meter = self.get_parameter(
+            'left_steps_per_meter'
+        ).value
+        self._right_steps_per_meter = self.get_parameter(
+            'right_steps_per_meter'
+        ).value
+        self._turn_steps_per_radian = self.get_parameter(
+            'turn_steps_per_radian'
         ).value
         self._max_rate = self.get_parameter('max_step_rate').value
         self._max_acceleration = self.get_parameter(
@@ -56,9 +60,13 @@ class BaseController(Node):
         self._publish_odom = self.get_parameter('publish_odom').value
         self._publish_odom_tf = self.get_parameter('publish_odom_tf').value
         self._debug_logging = self.get_parameter('debug_logging').value
-        if min(self._radius, self._separation, self._steps_per_rev) <= 0.0:
+        if min(
+            self._left_steps_per_meter,
+            self._right_steps_per_meter,
+            self._turn_steps_per_radian,
+        ) <= 0.0:
             raise ValueError(
-                'Robot dimensions and steps_per_revolution must be positive'
+                'Movement calibration values must be positive'
             )
 
         self._hardware = FourWheelHardware(
@@ -104,14 +112,17 @@ class BaseController(Node):
     def _command_callback(self, message):
         linear = message.linear.x
         angular = message.angular.z
-        left_velocity = linear - angular * self._separation / 2.0
-        right_velocity = linear + angular * self._separation / 2.0
-        steps_per_meter = self._steps_per_rev / (2.0 * math.pi * self._radius)
         left_rate = clamp(
-            left_velocity * steps_per_meter, -self._max_rate, self._max_rate
+            linear * self._left_steps_per_meter
+            - angular * self._turn_steps_per_radian,
+            -self._max_rate,
+            self._max_rate,
         )
         right_rate = clamp(
-            right_velocity * steps_per_meter, -self._max_rate, self._max_rate
+            linear * self._right_steps_per_meter
+            + angular * self._turn_steps_per_radian,
+            -self._max_rate,
+            self._max_rate,
         )
         self._target_rates = [left_rate, left_rate, right_rate, right_rate]
         self._last_command = time.monotonic()
@@ -163,11 +174,20 @@ class BaseController(Node):
             for count, previous in zip(counts, self._last_counts)
         ]
         self._last_counts = counts
-        meters_per_step = 2.0 * math.pi * self._radius / self._steps_per_rev
-        left_distance = 0.5 * (deltas[0] + deltas[1]) * meters_per_step
-        right_distance = 0.5 * (deltas[2] + deltas[3]) * meters_per_step
-        distance = 0.5 * (left_distance + right_distance)
-        yaw_change = (right_distance - left_distance) / self._separation
+        left_steps = 0.5 * (deltas[0] + deltas[1])
+        right_steps = 0.5 * (deltas[2] + deltas[3])
+        translation_denominator = (
+            self._left_steps_per_meter + self._right_steps_per_meter
+        )
+        distance = (
+            left_steps + right_steps
+        ) / translation_denominator
+        yaw_change = (
+            self._left_steps_per_meter * right_steps
+            - self._right_steps_per_meter * left_steps
+        ) / (
+            self._turn_steps_per_radian * translation_denominator
+        )
         self._x += distance * math.cos(self._yaw + yaw_change / 2.0)
         self._y += distance * math.sin(self._yaw + yaw_change / 2.0)
         self._yaw += yaw_change

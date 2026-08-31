@@ -303,17 +303,18 @@ Enter or tune the following values.
 - `step_pins`, `dir_pins`, `reset_pins`, `sleep_pins`: actual BCM GPIO wiring
   in LF, LR, RF, RR order
 - `direction_inverted`: one Boolean per wheel; tune with the wheels raised
-- `wheel_radius`: loaded wheel radius in metres
-- `wheel_separation`: begin with the measured tread-center separation, then
-  tune it using a measured rotation because four-wheel skid steering scrubs
-- `steps_per_revolution`: motor full steps × driver microsteps × gearbox ratio
+- `left_steps_per_meter`: calibrated average left-side pulses per metre
+- `right_steps_per_meter`: calibrated average right-side pulses per metre
+- `turn_steps_per_radian`: average pulses on either side for one radian of
+  in-place rotation
 - `max_step_rate`: highest reliable pulse rate in steps/s without missed steps
 - `max_step_acceleration`: highest reliable ramp in steps/s² without stalling
 - `command_timeout`: safety stop delay in seconds; normally leave at 0.5
 
 The current controller sends one rate to both left wheels and another to both
-right wheels. Wheelbase is not a separate kinematic parameter, but it affects
-scrubbing and therefore the calibrated effective `wheel_separation`.
+right wheels. Physical wheel radius and separation remain real dimensions in
+the URDF and Gazebo model; motor conversion uses the directly measured pulse
+coefficients above.
 
 #### `my_robot/urdf/robot.urdf`
 
@@ -405,24 +406,45 @@ and 0.3 kg per wheel until those values are measured.
 
 1. Verify all GPIO assignments against the physical wiring.
 2. Raise the wheels and tune `direction_inverted`.
-3. Enter loaded wheel radius and calculated motor steps per revolution.
+3. Calculate initial steps/metre, then measure left and right travel.
 4. Find conservative step-rate and acceleration limits.
-5. Calibrate straight distance, then effective wheel separation.
+5. Calibrate straight distance, then steps/radian for turns.
 6. Enter body and sensor measurements in the URDF and Nav2 costmaps.
 7. Validate IMU axes and noise values.
 8. Copy the final geometry into the Gazebo SDF if simulation should match.
 
-First calculate the starting `steps_per_revolution`:
+Calculate an initial translation estimate from the electrical and mechanical
+configuration:
 
 ```text
-steps_per_revolution =
+steps_per_wheel_revolution =
     motor full steps/revolution × microstep setting × gearbox ratio
+
+initial steps_per_meter =
+    steps_per_wheel_revolution ÷ (2π × loaded wheel radius)
 ```
 
-For a 200-step motor, 1/16 microstepping, and no gearbox, use 3200. A large
-factor-of-2, 4, 8, or 16 distance error usually means the configured microstep
-setting does not match the driver's MS pins. Correct that mismatch before
-fine calibration.
+The A4988 MS1, MS2, and MS3 inputs have internal pull-down resistors. When all
+three pins are unconnected, the driver uses full-step mode. Therefore a 1.8°
+motor requires 200 STEP pulses per motor revolution. With direct drive, that
+is also 200 pulses per wheel revolution. A gearbox would multiply this value
+by its reduction ratio.
+
+Use this result as the initial value for both `left_steps_per_meter` and
+`right_steps_per_meter`. The controller changes STEP frequency to change speed:
+
+```text
+left frequency = requested translation × left_steps_per_meter
+                 - requested rotation × turn_steps_per_radian
+
+right frequency = requested translation × right_steps_per_meter
+                  + requested rotation × turn_steps_per_radian
+```
+
+With a 0.049 m wheel radius and 200 steps/revolution, the theoretical starting
+value is about 650 steps/m. The configured measured values are 652 left and
+645 right. At 0.10 m/s, they request approximately 65 pulses/s before any
+turning component is added.
 
 #### Correct movement directions
 
@@ -437,7 +459,8 @@ the motor test:
 
 If one wheel is reversed, toggle only its matching `direction_inverted` entry.
 If an entire side behaves incorrectly, verify LF/LR/RF/RR GPIO ordering before
-changing calibration. `steps_per_revolution` changes distance, not direction.
+changing calibration. Pulse calibration changes distance and angle, not GPIO
+direction.
 
 #### Calibrate forward and backward distance
 
@@ -449,29 +472,31 @@ ros2 run my_robot drive front --duration 10 --speed 0.10
 ```
 
 The expected distance is speed × duration, or 1.0 m for this command. Measure
-from the same physical point on the robot before and after movement, then use:
+from the same physical point before and after movement. Calibrate each side
+from generated pulse counts and measured distance:
 
 ```text
-new steps_per_revolution =
-    old steps_per_revolution × expected distance ÷ measured distance
+steps_per_meter = generated side pulse count ÷ measured distance
 ```
 
-If the robot travels only 0.80 m with 3200 configured steps:
+For a simple whole-robot correction when individual pulse counts were not
+recorded:
 
 ```text
-3200 × 1.00 ÷ 0.80 = 4000 steps/revolution
+new side steps_per_meter =
+    old side steps_per_meter × expected distance ÷ measured distance
 ```
 
 Repeat forward at least three times and use the average measured distance. Then
 repeat backward. If forward and backward differ substantially, inspect driver
 current limits, loose wheels, backlash, floor slip, battery voltage, and missed
-steps; one shared step value cannot correct a mechanical direction-dependent
-error.
+steps; fixed coefficients cannot correct a direction-dependent mechanical error.
 
 If the robot consistently curves while all four directions are correct, do not
-change the shared step count first. Check unequal wheel diameters, binding,
-driver current, motor skipping, weight distribution, and traction. This
-controller currently has no independent per-wheel scale factors or encoders.
+change turn calibration first. Correct left/right steps-per-metre values only
+after checking unequal wheel diameters, binding, driver current, motor skipping,
+weight distribution, and traction. There are side-specific coefficients, but
+no individual-wheel coefficients or encoders.
 
 #### Calibrate turns
 
@@ -482,26 +507,28 @@ request a slow 180° left turn:
 ros2 run my_robot drive left --duration 15.708 --turn-speed 0.20
 ```
 
-Measure the actual angle in radians or degrees. Use the same units for expected
-and measured angles:
+Measure the actual angle. The practical correction from an existing value is:
 
 ```text
-new wheel_separation =
-    old wheel_separation × expected turn angle ÷ measured turn angle
+new turn_steps_per_radian =
+    old turn_steps_per_radian × expected angle ÷ measured angle
 ```
 
-For example, if 180° was requested but the robot turned only 150° with a
-0.165 m separation:
+It can also be calculated directly when pulse totals are available:
 
 ```text
-0.165 × 180 ÷ 150 = 0.198 m
+turn_steps_per_radian =
+    average absolute side pulse count ÷ measured angle in radians
+
+average pulses = (170 + 174) ÷ 2 = 172
+turn_steps_per_radian = 172 ÷ 3.1416 = 54.75
 ```
 
 Repeat left and right turns several times and average the results. Calibrate on
 the same floor used for navigation because four-wheel skid-steer turning
 depends strongly on tire scrub and traction. If left and right results differ
 greatly, correct mechanical drag, motor current, wheel size, or weight balance
-instead of hiding the asymmetry in one separation value.
+instead of hiding the asymmetry in one turn coefficient.
 
 #### Tune rate and acceleration
 
@@ -511,6 +538,19 @@ steady speed. Reduce `max_step_acceleration` when they lose steps while starting
 stopping, or reversing. Set conservative limits below the first failure point,
 then repeat the straight and turn calibration because missed steps invalidate
 those measurements.
+
+### Movement calibration and timing changes
+
+The physical controller now uses `left_steps_per_meter`,
+`right_steps_per_meter`, and `turn_steps_per_radian` directly. Physical wheel
+radius and separation remain real dimensions in the URDF and Gazebo model;
+they are no longer altered to hide drivetrain calibration error.
+
+The GPIO timing code also avoids waking a wheel pulse thread when its requested
+rate is unchanged. Previously, the 50 Hz controller repeatedly signaled every
+pulse thread even at a steady rate. At low motor frequencies those wakeups
+could shorten pulse periods and distort the requested speed. A new unit test
+verifies that an unchanged rate does not signal the pulse thread.
 
 ### Map with the physical robot
 

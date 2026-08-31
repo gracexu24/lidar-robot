@@ -1,6 +1,7 @@
 """Tests for GPIO driver sleep and reset behavior."""
 
 import time
+import threading
 
 from my_robot import stepper_hardware
 
@@ -42,6 +43,33 @@ def wait_for(predicate, timeout=0.5):
             return
         time.sleep(0.001)
     raise AssertionError('Timed out waiting for motor output transition')
+
+
+class FakeEvent:
+    """Count wakeups requested by a rate update."""
+
+    def __init__(self):
+        self.set_count = 0
+
+    def set(self):
+        """Record one event signal."""
+        self.set_count += 1
+
+
+def test_unchanged_rate_does_not_interrupt_pulse_timing():
+    """Wake the pulse loop only when its requested frequency changes."""
+    wheel = stepper_hardware.StepperWheel.__new__(
+        stepper_hardware.StepperWheel
+    )
+    wheel._rate = 25.0
+    wheel._lock = threading.Lock()
+    wheel._changed = FakeEvent()
+
+    wheel.set_rate(25.0)
+    assert wheel._changed.set_count == 0
+
+    wheel.set_rate(30.0)
+    assert wheel._changed.set_count == 1
 
 
 def test_sleep_stops_driver_without_reasserting_reset(monkeypatch):

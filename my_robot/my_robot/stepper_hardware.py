@@ -55,9 +55,12 @@ class StepperWheel:
 
     def set_rate(self, signed_steps_per_second):
         """Set the logical pulse rate and direction."""
+        new_rate = float(signed_steps_per_second)
         with self._lock:
-            self._rate = float(signed_steps_per_second)
-        self._changed.set()
+            rate_changed = new_rate != self._rate
+            self._rate = new_rate
+        if rate_changed:
+            self._changed.set()
 
     def step_count(self):
         """Return the signed count of pulses generated."""
