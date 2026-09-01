@@ -63,7 +63,7 @@ def generate_launch_description():
             name='velocity_smoother',
             remappings=[
                 ('cmd_vel', 'cmd_vel_nav'),
-                ('smoothed_cmd_vel', 'cmd_vel'),
+                ('cmd_vel_smoothed', 'cmd_vel'),
             ],
             **common,
         ),

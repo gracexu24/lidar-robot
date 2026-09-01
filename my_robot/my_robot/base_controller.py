@@ -30,7 +30,8 @@ class BaseController(Node):
         )
         self.declare_parameter('left_steps_per_meter', 652.0)
         self.declare_parameter('right_steps_per_meter', 645.0)
-        self.declare_parameter('turn_steps_per_radian', 54.75)
+        self.declare_parameter('left_turn_steps_per_radian', 54.75)
+        self.declare_parameter('right_turn_steps_per_radian', 54.75)
         self.declare_parameter('max_step_rate', 75.0)
         self.declare_parameter('max_step_acceleration', 100.0)
         self.declare_parameter('command_timeout', 0.5)
@@ -49,8 +50,11 @@ class BaseController(Node):
         self._right_steps_per_meter = self.get_parameter(
             'right_steps_per_meter'
         ).value
-        self._turn_steps_per_radian = self.get_parameter(
-            'turn_steps_per_radian'
+        self._left_turn_steps_per_radian = self.get_parameter(
+            'left_turn_steps_per_radian'
+        ).value
+        self._right_turn_steps_per_radian = self.get_parameter(
+            'right_turn_steps_per_radian'
         ).value
         self._max_rate = self.get_parameter('max_step_rate').value
         self._max_acceleration = self.get_parameter(
@@ -63,7 +67,8 @@ class BaseController(Node):
         if min(
             self._left_steps_per_meter,
             self._right_steps_per_meter,
-            self._turn_steps_per_radian,
+            self._left_turn_steps_per_radian,
+            self._right_turn_steps_per_radian,
         ) <= 0.0:
             raise ValueError(
                 'Movement calibration values must be positive'
@@ -112,15 +117,20 @@ class BaseController(Node):
     def _command_callback(self, message):
         linear = message.linear.x
         angular = message.angular.z
+        turn_steps_per_radian = (
+            self._left_turn_steps_per_radian
+            if angular >= 0.0
+            else self._right_turn_steps_per_radian
+        )
         left_rate = clamp(
             linear * self._left_steps_per_meter
-            - angular * self._turn_steps_per_radian,
+            - angular * turn_steps_per_radian,
             -self._max_rate,
             self._max_rate,
         )
         right_rate = clamp(
             linear * self._right_steps_per_meter
-            + angular * self._turn_steps_per_radian,
+            + angular * turn_steps_per_radian,
             -self._max_rate,
             self._max_rate,
         )
@@ -182,11 +192,17 @@ class BaseController(Node):
         distance = (
             left_steps + right_steps
         ) / translation_denominator
-        yaw_change = (
+        yaw_numerator = (
             self._left_steps_per_meter * right_steps
             - self._right_steps_per_meter * left_steps
-        ) / (
-            self._turn_steps_per_radian * translation_denominator
+        )
+        turn_steps_per_radian = (
+            self._left_turn_steps_per_radian
+            if yaw_numerator >= 0.0
+            else self._right_turn_steps_per_radian
+        )
+        yaw_change = yaw_numerator / (
+            turn_steps_per_radian * translation_denominator
         )
         self._x += distance * math.cos(self._yaw + yaw_change / 2.0)
         self._y += distance * math.sin(self._yaw + yaw_change / 2.0)
@@ -243,7 +259,7 @@ def main(args=None):
     finally:
         if node is not None:
             node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

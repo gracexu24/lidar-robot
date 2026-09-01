@@ -84,10 +84,16 @@ class LidarReader(Node):
 def main(args=None):
     """Run the LiDAR reader example."""
     rclpy.init(args=args)
-    node = LidarReader()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    node = None
+    try:
+        node = LidarReader()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

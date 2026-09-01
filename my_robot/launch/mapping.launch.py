@@ -1,4 +1,4 @@
-"""Run the physical robot, online SLAM, and Nav2 for map creation."""
+"""Run the physical robot and online SLAM for map creation."""
 
 import os
 
@@ -19,6 +19,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_imu = LaunchConfiguration('use_imu')
     start_mpu6050 = LaunchConfiguration('start_mpu6050')
+    start_nav2 = LaunchConfiguration('start_nav2')
     debug_logging = LaunchConfiguration('debug_logging')
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0'),
@@ -26,6 +27,11 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('use_imu', default_value='false'),
         DeclareLaunchArgument('start_mpu6050', default_value='true'),
+        DeclareLaunchArgument(
+            'start_nav2',
+            default_value='false',
+            description='Start Nav2 servers while mapping',
+        ),
         DeclareLaunchArgument('debug_logging', default_value='false'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -56,6 +62,7 @@ def generate_launch_description():
                     robot_share, 'launch', 'navigation_core.launch.py'
                 )
             ),
+            condition=IfCondition(start_nav2),
             launch_arguments={'use_sim_time': use_sim_time}.items(),
         ),
     ])

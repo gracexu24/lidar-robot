@@ -1,6 +1,7 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 30.0
+    # Keep transform publication reliable on the Raspberry Pi under SLAM load.
+    frequency: 20.0
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true

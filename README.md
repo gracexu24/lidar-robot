@@ -122,11 +122,16 @@ Useful keys:
 - `,`: reverse
 - `j`: turn left
 - `l`: turn right
+- `u` and `o`: move forward in left and right arcs
 - `k`: stop
 - `q` and `z`: increase and decrease all speeds
 - `w` and `x`: increase and decrease linear speed
 - `e` and `c`: increase and decrease angular speed
 - `Ctrl+C`: exit
+
+Prefer moving arcs instead of stationary turns when possible. Keyboard `u` and
+`o` combine forward motion with turning, reducing tire scrub and stress on the
+wheel hubs.
 
 The physical motor controller has a 0.5-second watchdog, so hold or repeat a
 movement key. Press `k` before leaving the keyboard terminal.
@@ -250,7 +255,7 @@ ros2 topic echo /imu/data --once
 ros2 topic echo /imu/temperature --once
 ```
 
-The data rate should be near 100 Hz. At rest, angular velocity should be near
+The data rate should be near 50 Hz. At rest, angular velocity should be near
 zero and total acceleration near 9.8 m/s². Keep the robot still for the first
 approximately 2.5 seconds while gyro bias is measured.
 
@@ -305,8 +310,8 @@ Enter or tune the following values.
 - `direction_inverted`: one Boolean per wheel; tune with the wheels raised
 - `left_steps_per_meter`: calibrated average left-side pulses per metre
 - `right_steps_per_meter`: calibrated average right-side pulses per metre
-- `turn_steps_per_radian`: average pulses on either side for one radian of
-  in-place rotation
+- `left_turn_steps_per_radian`: average pulses for one radian of left rotation
+- `right_turn_steps_per_radian`: average pulses for one radian of right rotation
 - `max_step_rate`: highest reliable pulse rate in steps/s without missed steps
 - `max_step_acceleration`: highest reliable ramp in steps/s² without stalling
 - `command_timeout`: safety stop delay in seconds; normally leave at 0.5
@@ -335,7 +340,7 @@ be measured to the sensing center, not to an enclosure edge.
 - `i2c_address`: `0x68` or `0x69`, as reported by `i2cdetect`
 - `gyro_stddev`: stationary angular-velocity standard deviation in rad/s
 - `accel_stddev`: stationary linear-acceleration standard deviation in m/s²
-- `publish_rate`: measured sustainable data rate; normally leave at 100 Hz
+- `publish_rate`: measured sustainable data rate; normally leave at 50 Hz
 - `calibration_samples`: increase for a steadier bias estimate if startup time
   is acceptable; keep the robot still for all samples
 
@@ -435,16 +440,15 @@ Use this result as the initial value for both `left_steps_per_meter` and
 
 ```text
 left frequency = requested translation × left_steps_per_meter
-                 - requested rotation × turn_steps_per_radian
+                 - requested rotation × direction_turn_steps_per_radian
 
 right frequency = requested translation × right_steps_per_meter
-                  + requested rotation × turn_steps_per_radian
+                  + requested rotation × direction_turn_steps_per_radian
 ```
 
 With a 0.049 m wheel radius and 200 steps/revolution, the theoretical starting
-value is about 650 steps/m. The configured measured values are 652 left and
-645 right. At 0.10 m/s, they request approximately 65 pulses/s before any
-turning component is added.
+value is about 650 steps/m. Use the configured left and right values when
+calculating the requested pulse rates.
 
 #### Correct movement directions
 
@@ -507,28 +511,29 @@ request a slow 180° left turn:
 ros2 run my_robot drive left --duration 15.708 --turn-speed 0.20
 ```
 
-Measure the actual angle. The practical correction from an existing value is:
+Measure the actual angle. Apply the correction separately to
+`left_turn_steps_per_radian` or `right_turn_steps_per_radian`:
 
 ```text
-new turn_steps_per_radian =
-    old turn_steps_per_radian × expected angle ÷ measured angle
+new direction_turn_steps_per_radian =
+    old direction_turn_steps_per_radian × expected angle ÷ measured angle
 ```
 
 It can also be calculated directly when pulse totals are available:
 
 ```text
-turn_steps_per_radian =
+direction_turn_steps_per_radian =
     average absolute side pulse count ÷ measured angle in radians
 
 average pulses = (170 + 174) ÷ 2 = 172
-turn_steps_per_radian = 172 ÷ 3.1416 = 54.75
+direction_turn_steps_per_radian = 172 ÷ 3.1416 = 54.75
 ```
 
-Repeat left and right turns several times and average the results. Calibrate on
-the same floor used for navigation because four-wheel skid-steer turning
-depends strongly on tire scrub and traction. If left and right results differ
-greatly, correct mechanical drag, motor current, wheel size, or weight balance
-instead of hiding the asymmetry in one turn coefficient.
+Repeat each direction several times and average its results. Calibrate on the
+same floor used for navigation because four-wheel skid-steer turning depends
+strongly on tire scrub and traction. If the directional values differ greatly,
+correct mechanical drag, loose hubs, motor current, wheel size, or weight
+balance; direction-specific calibration must not hide an unstable fault.
 
 #### Tune rate and acceleration
 
@@ -542,9 +547,10 @@ those measurements.
 ### Movement calibration and timing changes
 
 The physical controller now uses `left_steps_per_meter`,
-`right_steps_per_meter`, and `turn_steps_per_radian` directly. Physical wheel
-radius and separation remain real dimensions in the URDF and Gazebo model;
-they are no longer altered to hide drivetrain calibration error.
+`right_steps_per_meter`, `left_turn_steps_per_radian`, and
+`right_turn_steps_per_radian` directly. Physical wheel radius and separation
+remain real dimensions in the URDF and Gazebo model; they are no longer altered
+to hide drivetrain calibration error.
 
 The GPIO timing code also avoids waking a wheel pulse thread when its requested
 rate is unchanged. Previously, the 50 Hz controller repeatedly signaled every
@@ -554,12 +560,16 @@ verifies that an unchanged rate does not signal the pulse thread.
 
 ### Map with the physical robot
 
-Terminal 1 starts the robot, SLAM Toolbox, and Nav2:
+Terminal 1 starts the robot and SLAM Toolbox. Nav2 is disabled during manual
+mapping by default to reduce CPU load and transform delays:
 
 ```bash
 ros2 launch my_robot mapping.launch.py \
-  lidar_port:=/dev/ttyUSB0 use_imu:=false debug_logging:=true
+  lidar_port:=/dev/ttyUSB0 use_imu:=false debug_logging:=false
 ```
+
+Set `start_nav2:=true` only when Nav2 servers are specifically needed while
+mapping.
 
 Terminal 2 runs RViz using the shared RViz setup with Fixed Frame `map`.
 Terminal 3 runs the shared keyboard-control command.
@@ -736,11 +746,46 @@ behavior.
 - `lidar_reader.py`: reports LiDAR connection and scan diagnostics.
 - `manual_drive.py`: provides bounded front, back, left, right, and stop tests.
 - `base.launch.py`: starts physical motors, transforms, LiDAR, and optional EKF.
-- `mapping.launch.py`: starts the physical base, SLAM Toolbox, and Nav2.
+- `mapping.launch.py`: starts the physical base and SLAM Toolbox; Nav2 is
+  optional with `start_nav2:=true`.
 - `navigation.launch.py`: starts the physical base, map server, AMCL, and Nav2.
 - `navigation_core.launch.py`: contains Nav2 servers shared by both modes.
 - `simulation*.launch.py`, `gazebo_bridge.yaml`, and `test_room.sdf`: implement
   Gazebo movement, sensors, mapping, and navigation.
+
+## Work log: 1 September 2026
+
+Physical bring-up, calibration, mapping, and first Nav2 runs produced these
+software changes.
+
+### Motor calibration
+
+Floor tests updated `left_steps_per_meter` and `right_steps_per_meter` from the
+theoretical 650 steps/m starting values. In-place left and right turns were
+unequal, so the controller now uses separate
+`left_turn_steps_per_radian` and `right_turn_steps_per_radian` values instead of
+one shared coefficient. `max_step_rate` and `max_step_acceleration` were raised
+after raised-wheel and floor tests; original conservative limits remain in
+comments. Prefer keyboard `u`/`o` moving arcs over stationary `j`/`l` turns to
+reduce tire scrub and hub stress.
+
+### IMU and mapping load
+
+The MPU6050 driver needs the user in the `i2c` group to open `/dev/i2c-1`. After
+that access works, IMU publish rate is 50 Hz and the EKF runs at 20 Hz so
+transforms stay timely on the Raspberry Pi. Mapping no longer starts Nav2 by
+default; add `start_nav2:=true` only when those servers are needed while
+building a map. IMU fusion still needs the robot still during gyro calibration.
+
+### Navigation
+
+Nav2 goals reached the planner but never moved the robot because the velocity
+smoother remapping used `smoothed_cmd_vel` instead of `cmd_vel_smoothed`. The
+smoother now publishes on `/cmd_vel`. Controller frequency is 10 Hz, and
+`bt_navigator` timeouts were increased so slower Pi action servers can
+acknowledge `follow_path`. Set **2D Pose Estimate** in RViz before sending a
+goal. Node shutdown now uses `rclpy.try_shutdown()` so Ctrl+C no longer reports
+a false crash after ROS has already shut down.
 
 ## Accuracy limitations
 

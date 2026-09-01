@@ -4,7 +4,8 @@ mpu6050_driver:
     # Use 0x69 when the module's AD0 pin is tied high.
     i2c_address: 0x68
     frame_id: imu_link
-    publish_rate: 100.0
+    # 50 Hz is sufficient for yaw-rate fusion and reduces I2C/CPU load.
+    publish_rate: 50.0
     # Startup takes about 2.5 seconds. Keep the robot completely still.
     calibration_samples: 500
     gyro_stddev: 0.02
