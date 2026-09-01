@@ -251,7 +251,6 @@ In another sourced terminal:
 ```bash
 timeout 5s ros2 topic hz /imu/data
 ros2 topic echo /imu/data --once
-ros2 topic echo /imu/temperature --once
 ```
 
 The data rate should be near 50 Hz. At rest, angular velocity should be near
@@ -840,7 +839,7 @@ behavior.
 - `base_controller.py`: converts `/cmd_vel` to wheel step rates, ramps commands,
   enforces the watchdog, and publishes open-loop wheel odometry.
 - `stepper_hardware.py`: owns four GPIO pulse threads and driver state.
-- `mpu6050_driver.py`: publishes I2C accelerometer, gyro, and temperature data.
+- `mpu6050_driver.py`: publishes I2C accelerometer and gyro data.
 - `lidar_reader.py`: reports LiDAR connection and scan diagnostics.
 - `manual_drive.py`: provides bounded front, back, left, right, and stop tests.
 - `base.launch.py`: starts physical motors, transforms, LiDAR, and optional EKF.

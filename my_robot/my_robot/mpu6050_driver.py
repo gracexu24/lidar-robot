@@ -6,7 +6,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Imu, Temperature
+from sensor_msgs.msg import Imu
 
 try:
     from smbus2 import SMBus
@@ -79,9 +79,6 @@ class Mpu6050Driver(Node):
             )
 
         self._imu_publisher = self.create_publisher(Imu, 'imu/data', 10)
-        self._temperature_publisher = self.create_publisher(
-            Temperature, 'imu/temperature', 10
-        )
         self.create_timer(1.0 / publish_rate, self._publish_measurement)
         self.get_logger().info(
             f'MPU6050 ready on I2C bus {bus_number}, '
@@ -142,7 +139,7 @@ class Mpu6050Driver(Node):
 
     def _publish_measurement(self):
         try:
-            accel_x, accel_y, accel_z, temperature, gyro_x, gyro_y, gyro_z = (
+            accel_x, accel_y, accel_z, _, gyro_x, gyro_y, gyro_z = (
                 self._read_raw()
             )
         except OSError as error:
@@ -185,12 +182,6 @@ class Mpu6050Driver(Node):
             message.angular_velocity_covariance[index] = gyro_variance
             message.linear_acceleration_covariance[index] = accel_variance
         self._imu_publisher.publish(message)
-
-        temperature_message = Temperature()
-        temperature_message.header.stamp = stamp
-        temperature_message.header.frame_id = self._frame_id
-        temperature_message.temperature = temperature / 340.0 + 36.53
-        self._temperature_publisher.publish(temperature_message)
         if self._debug_logging:
             self.get_logger().info(
                 '[imu debug] '
@@ -199,8 +190,7 @@ class Mpu6050Driver(Node):
                 f'{linear_acceleration[2]:.2f}) m/s^2, '
                 f'gyro=({angular_velocity[0]:.3f}, '
                 f'{angular_velocity[1]:.3f}, '
-                f'{angular_velocity[2]:.3f}) rad/s, '
-                f'temperature={temperature_message.temperature:.1f} C',
+                f'{angular_velocity[2]:.3f}) rad/s',
                 throttle_duration_sec=1.0,
             )
 

@@ -8,12 +8,17 @@ base_controller:
     direction_inverted: [true, true, false, false]
 
     # Directly calibrated physical movement conversions.
+    # Original theoretical values: left=650.0, right=650.0, turns=53.6.
     left_steps_per_meter: 707.0
     right_steps_per_meter: 698.9
+    # First 90-degree corrections: left=120.6, right=482.4.
+    # Left=120.6 produced 80 degrees; corrected by 90/80.
     left_turn_steps_per_radian: 170.0
     right_turn_steps_per_radian: 482.4
 
-    # Pulse frequency controls speed.
+    # Pulse frequency controls speed; 200 steps/s allows approximately
+    # 0.31 m/s with the calibrated steps-per-metre values.
+    # Original conservative limits: rate=75.0, acceleration=100.0.
     max_step_rate: 500.0
     max_step_acceleration: 300.0
     command_timeout: 0.5
