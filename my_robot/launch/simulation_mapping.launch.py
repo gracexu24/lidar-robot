@@ -1,4 +1,4 @@
-"""Run Gazebo, SLAM Toolbox, and Nav2 for simulated mapping."""
+"""Run Gazebo and SLAM Toolbox for simulated mapping."""
 
 import os
 

@@ -28,12 +28,12 @@ class BaseController(Node):
         self.declare_parameter(
             'direction_inverted', [True, True, False, False]
         )
-        self.declare_parameter('left_steps_per_meter', 652.0)
-        self.declare_parameter('right_steps_per_meter', 645.0)
-        self.declare_parameter('left_turn_steps_per_radian', 54.75)
-        self.declare_parameter('right_turn_steps_per_radian', 54.75)
-        self.declare_parameter('max_step_rate', 75.0)
-        self.declare_parameter('max_step_acceleration', 100.0)
+        self.declare_parameter('left_steps_per_meter', 707.0)
+        self.declare_parameter('right_steps_per_meter', 698.9)
+        self.declare_parameter('left_turn_steps_per_radian', 170.0)
+        self.declare_parameter('right_turn_steps_per_radian', 482.4)
+        self.declare_parameter('max_step_rate', 500.0)
+        self.declare_parameter('max_step_acceleration', 300.0)
         self.declare_parameter('command_timeout', 0.5)
         self.declare_parameter('publish_odom', True)
         self.declare_parameter('publish_odom_tf', True)

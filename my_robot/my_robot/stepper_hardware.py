@@ -174,10 +174,6 @@ class FourWheelHardware:
         """Return signed pulse counts in LF, LR, RF, RR order."""
         return [wheel.step_count() for wheel in self.wheels]
 
-    def stop(self):
-        """Request zero rate on every wheel."""
-        self.set_rates([0.0] * 4)
-
     def close(self):
         """Disable and release all wheel channels."""
         for wheel in self.wheels:
