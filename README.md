@@ -587,6 +587,35 @@ robot's measured starting position and heading. Send a short unobstructed
 **Nav2 Goal**, then increase the distance after verifying localization, obstacle
 detection, stopping, and recovery behavior.
 
+## Simulation and hardware differences
+
+Simulation and hardware use the same high-level ROS 2 interfaces:
+
+- `/cmd_vel` carries movement commands.
+- `/odom` reports robot motion.
+- `/scan` provides LiDAR measurements.
+- `/imu/data` provides IMU measurements.
+- The TF tree describes the robot frames.
+- SLAM Toolbox, Nav2, and their configuration files are shared.
+
+The low-level motor and sensor implementations are different. On physical
+hardware, `base_controller.py` converts `/cmd_vel` into STEP/DIR GPIO pulses,
+the LDROBOT driver publishes real LiDAR scans, and `mpu6050_driver.py`
+publishes real IMU measurements. The physical base controller also applies its
+own 0.5-second command watchdog.
+
+In simulation, Gazebo's DiffDrive system replaces the GPIO motor controller
+and publishes simulated odometry. Gazebo sensors replace the physical LiDAR
+and MPU6050. `cmd_vel_watchdog.py` forwards commands to Gazebo and publishes a
+stop command after 0.6 seconds without a fresh command. This is needed because
+Gazebo otherwise continues applying its most recent velocity indefinitely.
+
+Consequently, simulation exercises the shared mapping, localization,
+navigation, transforms, and topic connections, but it does not test GPIO
+timing, electrical wiring, motor-driver settings, missed steps, wheel slip, or
+real sensor noise. Calibrate and safety-test the physical drivetrain
+separately even when the simulated robot behaves correctly.
+
 ## Gazebo Harmonic simulation
 
 Simulation replaces physical GPIO motors and serial sensors with:

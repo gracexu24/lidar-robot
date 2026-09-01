@@ -63,6 +63,13 @@ def generate_launch_description():
             output='screen',
         ),
         Node(
+            package='my_robot',
+            executable='cmd_vel_watchdog',
+            name='cmd_vel_watchdog',
+            parameters=[{'use_sim_time': True, 'timeout': 0.6}],
+            output='screen',
+        ),
+        Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
             parameters=[

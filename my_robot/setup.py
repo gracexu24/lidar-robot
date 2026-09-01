@@ -35,6 +35,7 @@ setup(
     entry_points={
         'console_scripts': [
             'base_controller = my_robot.base_controller:main',
+            'cmd_vel_watchdog = my_robot.cmd_vel_watchdog:main',
             'drive = my_robot.manual_drive:main',
             'lidar_reader = my_robot.lidar_reader:main',
             'mpu6050_driver = my_robot.mpu6050_driver:main',

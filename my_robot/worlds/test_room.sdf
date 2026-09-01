@@ -132,25 +132,25 @@
 
       <!-- Wheel X positions assume a 0.22 m wheelbase. -->
       <link name="left_front_wheel">
-        <pose>0.11 0.0825 0.049 1.570796327 0 0</pose>
+        <pose>0.11 0.0825 0.049 -1.570796327 0 0</pose>
         <inertial><mass>0.3</mass><inertia><ixx>0.0004</ixx><iyy>0.0004</iyy><izz>0.0004</izz></inertia></inertial>
         <collision name="collision"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></collision>
         <visual name="visual"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></visual>
       </link>
       <link name="left_rear_wheel">
-        <pose>-0.11 0.0825 0.049 1.570796327 0 0</pose>
+        <pose>-0.11 0.0825 0.049 -1.570796327 0 0</pose>
         <inertial><mass>0.3</mass><inertia><ixx>0.0004</ixx><iyy>0.0004</iyy><izz>0.0004</izz></inertia></inertial>
         <collision name="collision"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></collision>
         <visual name="visual"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></visual>
       </link>
       <link name="right_front_wheel">
-        <pose>0.11 -0.0825 0.049 1.570796327 0 0</pose>
+        <pose>0.11 -0.0825 0.049 -1.570796327 0 0</pose>
         <inertial><mass>0.3</mass><inertia><ixx>0.0004</ixx><iyy>0.0004</iyy><izz>0.0004</izz></inertia></inertial>
         <collision name="collision"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></collision>
         <visual name="visual"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></visual>
       </link>
       <link name="right_rear_wheel">
-        <pose>-0.11 -0.0825 0.049 1.570796327 0 0</pose>
+        <pose>-0.11 -0.0825 0.049 -1.570796327 0 0</pose>
         <inertial><mass>0.3</mass><inertia><ixx>0.0004</ixx><iyy>0.0004</iyy><izz>0.0004</izz></inertia></inertial>
         <collision name="collision"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></collision>
         <visual name="visual"><geometry><cylinder><radius>0.049</radius><length>0.03</length></cylinder></geometry></visual>
@@ -158,27 +158,27 @@
 
       <joint name="left_front_joint" type="revolute">
         <parent>base_footprint</parent><child>left_front_wheel</child>
-        <axis><xyz>0 1 0</xyz></axis>
+        <axis><xyz expressed_in="__model__">0 1 0</xyz></axis>
       </joint>
       <joint name="left_rear_joint" type="revolute">
         <parent>base_footprint</parent><child>left_rear_wheel</child>
-        <axis><xyz>0 1 0</xyz></axis>
+        <axis><xyz expressed_in="__model__">0 1 0</xyz></axis>
       </joint>
       <joint name="right_front_joint" type="revolute">
         <parent>base_footprint</parent><child>right_front_wheel</child>
-        <axis><xyz>0 1 0</xyz></axis>
+        <axis><xyz expressed_in="__model__">0 1 0</xyz></axis>
       </joint>
       <joint name="right_rear_joint" type="revolute">
         <parent>base_footprint</parent><child>right_rear_wheel</child>
-        <axis><xyz>0 1 0</xyz></axis>
+        <axis><xyz expressed_in="__model__">0 1 0</xyz></axis>
       </joint>
 
       <plugin filename="gz-sim-diff-drive-system"
               name="gz::sim::systems::DiffDrive">
-        <left_joint>left_front_joint</left_joint>
-        <left_joint>left_rear_joint</left_joint>
-        <right_joint>right_front_joint</right_joint>
-        <right_joint>right_rear_joint</right_joint>
+        <left_joint>right_front_joint</left_joint>
+        <left_joint>right_rear_joint</left_joint>
+        <right_joint>left_front_joint</right_joint>
+        <right_joint>left_rear_joint</right_joint>
         <wheel_separation>0.165</wheel_separation>
         <wheel_radius>0.049</wheel_radius>
         <topic>/cmd_vel</topic>
