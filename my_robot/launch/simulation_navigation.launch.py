@@ -42,6 +42,7 @@ def generate_launch_description():
                 'start_base': 'false',
                 'use_sim_time': 'true',
                 'use_imu': 'false',
+                'set_initial_pose': 'true',
             }.items(),
         ),
     ])

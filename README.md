@@ -138,20 +138,19 @@ movement key. Press `k` before leaving the keyboard terminal.
 
 ### RViz setup
 
-Start RViz when a launch does not start it:
+Simulation launches already start RViz with `rviz/robot.rviz`. That config uses
+Fixed Frame `map` and adds the saved map, costmaps, laser scan, robot model, TF,
+and the Navigation 2 panel.
+
+Start RViz manually when a launch does not start it:
 
 ```bash
-rviz2
+rviz2 -d "$(ros2 pkg prefix my_robot)/share/my_robot/rviz/robot.rviz"
 ```
 
-For basic simulation, use `odom` as the Fixed Frame. For mapping and navigation,
-use `map`. Add these displays as needed:
-
-- RobotModel
-- TF
-- LaserScan using `/scan`
-- Map using `/map`
-- Navigation 2 panel for autonomous goals
+For basic simulation without SLAM or Nav2, use `odom` as the Fixed Frame. For
+mapping and navigation, keep `map`. If a Map display shows nothing, set its
+topic durability to Transient Local; `/map` is published once, not continuously.
 
 When using SSH, run RViz on another ROS 2 Jazzy computer on the same ROS domain,
 use X11 forwarding, or use Foxglove.
@@ -626,6 +625,97 @@ timing, electrical wiring, motor-driver settings, missed steps, wheel slip, or
 real sensor noise. Calibrate and safety-test the physical drivetrain
 separately even when the simulated robot behaves correctly.
 
+## Simulation usage and bring-up notes
+
+Use a desktop with Gazebo Harmonic and source the workspace in every terminal:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+```
+
+Run only one Gazebo instance. After changing launch, config, URDF, SDF, or
+RViz files, rebuild with `colcon build --symlink-install --packages-select
+my_robot` and source `install/setup.bash` again.
+
+Typical sequence:
+
+1. Drive the simulated robot with
+   `ros2 launch my_robot simulation.launch.py start_rviz:=true` and keyboard
+   teleop. In this mode only, set RViz Fixed Frame to `odom`.
+2. Map the test room with
+   `ros2 launch my_robot simulation_mapping.launch.py start_rviz:=true`, drive
+   the walls slowly, then save `$HOME/maps/sim_home`.
+3. Stop mapping. Navigate with
+   `ros2 launch my_robot simulation_navigation.launch.py map:=$HOME/maps/sim_home.yaml start_rviz:=true`.
+   Wait until the log says `Managed nodes are active`, then send a short
+   Nav2 Goal.
+
+Simulation launches load `rviz/robot.rviz`. That config uses Fixed Frame
+`map`, Transient Local durability on `/map`, LaserScan, RobotModel, costmaps,
+and the Navigation 2 panel. Keyboard teleop still publishes to `/cmd_vel`.
+Hold or repeat movement keys; `k` stops immediately. The simulated watchdog
+stops Gazebo about 0.6 seconds after the last command.
+
+### What was verified in simulation
+
+These behaviors were confirmed in Gazebo:
+
+- Straight forward and reverse motion, then in-place left and right turns.
+- Simulated `/scan`, `/odom`, `/imu/data`, and `/clock` publishing.
+- SLAM Toolbox building `/map` while driving the test room.
+- AMCL localizing on a saved map after an origin pose is available.
+- Nav2 accepting a goal and sending velocity through the smoother into Gazebo.
+
+### Simulation-only changes
+
+These files affect Gazebo, not GPIO motors or the physical LiDAR:
+
+- `worlds/test_room.sdf`: wheel cylinders rotated `-90°`, joint axes expressed
+  in the model frame, and directional wheel friction with a small lateral slip
+  so four-wheel skid-steer can yaw. Without that friction the body would not
+  turn even when `/odom` reported rotation.
+- `config/gazebo_bridge.yaml`: Gazebo now listens on `/cmd_vel_safe`.
+- `my_robot/cmd_vel_watchdog.py` and `launch/simulation.launch.py`: stop
+  Gazebo when `/cmd_vel` goes stale. The physical `base_controller.py`
+  already has its own 0.5-second watchdog and does not use this node.
+- `launch/simulation_navigation.launch.py`: sets `set_initial_pose:=true`
+  because the simulated robot always starts at the world origin.
+
+Do not copy SDF wheel friction, Gazebo axis fixes, or the simulation watchdog
+onto the Raspberry Pi. They do not replace motor calibration, GPIO direction
+checks, or real LiDAR serial setup.
+
+### Shared changes that also apply on hardware
+
+These are used by both simulated and physical mapping or navigation:
+
+- `launch/navigation_core.launch.py` remaps Jazzy's `/cmd_vel_smoothed` to
+  `/cmd_vel`. The previous Humble-era `/smoothed_cmd_vel` name left Nav2
+  planning while the robot sat still. Physical saved-map navigation needs
+  this remap as well.
+- `config/nav2.yaml`: AMCL `transform_tolerance` 1.0 s, global costmap
+  `initial_transform_timeout` 60 s, controller frequency 10 Hz, and a larger
+  DWB transform tolerance. These make Nav2 more tolerant of sim-time and
+  modest onboard lag; they do not change stepper pulse rates.
+- `launch/navigation.launch.py`: optional `set_initial_pose` (default
+  `false` on hardware) and a short delay so AMCL can publish `map` before
+  costmaps activate. On the Pi, still use **2D Pose Estimate** at the real
+  starting pose. Do not rely on the simulated origin seed.
+- `rviz/robot.rviz`: the same display layout can be opened on a laptop
+  visualizing the physical robot.
+
+`nav2.yaml` speed limits remain conservative (`max_vel_x` 0.10 m/s) for both
+targets. Raise them only after the physical wheels are calibrated.
+
+### What simulation does not prove for hardware
+
+A working Gazebo run does not mean the Pi drivetrain is ready. Simulation
+never exercises STEP/DIR timing, driver current, missed steps, tire scrub on
+a real floor, USB LiDAR enumeration, or MPU6050 I2C. The URDF and SDF are
+still separate models. If the real robot curves while driving straight, tune
+`motors.yaml`; do not change Gazebo wheel friction to hide that.
+
 ## Gazebo Harmonic simulation
 
 Simulation replaces physical GPIO motors and serial sensors with:
@@ -701,11 +791,19 @@ ros2 launch my_robot simulation_navigation.launch.py \
   map:=$HOME/maps/sim_home.yaml start_rviz:=true
 ```
 
-In RViz, use Fixed Frame `map`, set the initial pose near the world origin with
-**2D Pose Estimate**, and send a short **Nav2 Goal**. Verify that obstacles
-appear in the costmaps, `/cmd_vel` is generated, the robot stops before
-collisions, and recovery behaviors work. Keyboard control is optional during
-navigation and publishes directly to `/cmd_vel`.
+Simulation navigation seeds AMCL at the Gazebo origin, so the `map` frame
+exists without a manual pose. In RViz, use Fixed Frame `map`. Confirm the
+robot is aligned with the saved map; use **2D Pose Estimate** only if it is
+offset. Then send a short **Nav2 Goal**. Verify that obstacles appear in the
+costmaps, `/cmd_vel` is generated, the robot stops before collisions, and
+recovery behaviors work. Keyboard control is optional during navigation and
+publishes directly to `/cmd_vel`.
+
+If AMCL logs `Please set the initial pose` or Nav2 rejects goals with
+`Action server is inactive`, AMCL has not published `map` yet and the
+navigator failed to start. Restart this launch after rebuilding so the
+automatic origin pose can take effect. On the physical robot, set
+**2D Pose Estimate** within about one minute of launch.
 
 ## Gazebo implementation
 

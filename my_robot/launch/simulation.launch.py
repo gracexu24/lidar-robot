@@ -19,6 +19,7 @@ def generate_launch_description():
     bridge_config = os.path.join(
         package_share, 'config', 'gazebo_bridge.yaml'
     )
+    rviz_config = os.path.join(package_share, 'rviz', 'robot.rviz')
     with open(os.path.join(package_share, 'urdf', 'robot.urdf')) as urdf_file:
         robot_description = urdf_file.read()
 
@@ -81,6 +82,7 @@ def generate_launch_description():
             package='rviz2',
             executable='rviz2',
             condition=IfCondition(start_rviz),
+            arguments=['-d', rviz_config],
             parameters=[{'use_sim_time': True}],
             output='screen',
         ),

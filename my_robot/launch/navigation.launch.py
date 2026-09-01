@@ -4,7 +4,11 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -24,6 +28,9 @@ def generate_launch_description():
     use_imu = LaunchConfiguration('use_imu')
     start_mpu6050 = LaunchConfiguration('start_mpu6050')
     debug_logging = LaunchConfiguration('debug_logging')
+    set_initial_pose = ParameterValue(
+        LaunchConfiguration('set_initial_pose'), value_type=bool
+    )
     return LaunchDescription([
         DeclareLaunchArgument(
             'map', description='Absolute path to the saved map YAML file'
@@ -34,6 +41,11 @@ def generate_launch_description():
         DeclareLaunchArgument('use_imu', default_value='false'),
         DeclareLaunchArgument('start_mpu6050', default_value='true'),
         DeclareLaunchArgument('debug_logging', default_value='false'),
+        DeclareLaunchArgument(
+            'set_initial_pose',
+            default_value='false',
+            description='Seed AMCL at the map origin so the map frame exists immediately',
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(share, 'launch', 'base.launch.py')
@@ -63,7 +75,14 @@ def generate_launch_description():
             package='nav2_amcl',
             executable='amcl',
             name='amcl',
-            parameters=[params, {'use_sim_time': use_sim_time_value}],
+            parameters=[
+                params,
+                {
+                    'use_sim_time': use_sim_time_value,
+                    'set_initial_pose': set_initial_pose,
+                    'always_reset_initial_pose': set_initial_pose,
+                },
+            ],
             output='screen',
         ),
         Node(
@@ -77,10 +96,17 @@ def generate_launch_description():
             }],
             output='screen',
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(share, 'launch', 'navigation_core.launch.py')
-            ),
-            launch_arguments={'use_sim_time': use_sim_time}.items(),
+        TimerAction(
+            period=2.0,
+            actions=[
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(
+                            share, 'launch', 'navigation_core.launch.py'
+                        )
+                    ),
+                    launch_arguments={'use_sim_time': use_sim_time}.items(),
+                ),
+            ],
         ),
     ])
